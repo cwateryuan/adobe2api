@@ -156,15 +156,27 @@ def build_image_payload_candidates(
         if not source_image_ids:
             return [base_payload]
 
-        edited = dict(base_payload)
-        edited["generationMetadata"] = {
+        subject_reference = dict(base_payload)
+        subject_reference["referenceBlobs"] = [
+            {"id": img_id, "usage": "subject"} for img_id in source_image_ids
+        ]
+        subject_reference["modelSpecificPayload"] = {}
+
+        reference_image = dict(base_payload)
+        reference_image["generationMetadata"] = {
             "module": "image2image",
             "submodule": "ff-image-generate",
         }
-        edited["referenceBlobs"] = [
-            {"id": img_id, "usage": "general"} for img_id in source_image_ids
+        reference_image["referenceBlobs"] = []
+        reference_image["referenceImages"] = [
+            {"id": img_id} for img_id in source_image_ids
         ]
-        return [edited]
+
+        local_blob_reference = dict(reference_image)
+        local_blob_reference["referenceImages"] = [
+            {"localBlobRef": img_id} for img_id in source_image_ids
+        ]
+        return [subject_reference, reference_image, local_blob_reference]
 
     base_payload = {
         "modelId": upstream_model_id,
