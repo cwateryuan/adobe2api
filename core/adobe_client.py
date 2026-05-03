@@ -4,9 +4,10 @@ import json
 import logging
 import os
 import time
+import uuid
 from pathlib import Path
 from typing import Any, Callable, Optional
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 import requests
 
@@ -89,6 +90,8 @@ class AdobeClient:
     submit_url = "https://firefly-3p.ff.adobe.io/v2/3p-images/generate-async"
     video_submit_url = "https://firefly-3p.ff.adobe.io/v2/3p-videos/generate-async"
     upload_url = "https://firefly-3p.ff.adobe.io/v2/storage/image"
+    entity_api_base = "https://firefly-entity.adobe.io/api/entities/"
+    platform_cs_base = "https://platform-cs-va6.adobe.io/composite/component/path"
 
     def __init__(self) -> None:
         self.api_key = "clio-playground-web"
@@ -307,6 +310,14 @@ class AdobeClient:
             "user-agent": self.user_agent,
         }
 
+    def _entity_headers(self, token: str) -> dict:
+        return {
+            "Authorization": f"Bearer {token}",
+            "x-api-key": self.api_key,
+            "content-type": "application/json",
+            "accept": "application/json",
+        }
+
     def _post_json(self, url: str, headers: dict, payload: dict):
         session = self._session()
         if session is None:
@@ -410,6 +421,43 @@ class AdobeClient:
             )
         return resp
 
+    def _put_bytes(self, url: str, headers: dict, payload: bytes):
+        session = self._session()
+        if session is None:
+            try:
+                return requests.put(
+                    url,
+                    headers=headers,
+                    data=payload,
+                    timeout=60,
+                    proxies=self._requests_proxies(),
+                )
+            except requests.Timeout as exc:
+                raise UpstreamTemporaryError(
+                    f"upstream timeout: {exc}", error_type="timeout"
+                )
+            except requests.ProxyError as exc:
+                raise UpstreamTemporaryError(
+                    f"upstream proxy error: {exc}", error_type="proxy"
+                )
+            except requests.ConnectionError as exc:
+                raise UpstreamTemporaryError(
+                    f"upstream connection error: {exc}", error_type="connection"
+                )
+            except requests.RequestException as exc:
+                raise UpstreamTemporaryError(
+                    f"upstream request error: {exc}", error_type="network"
+                )
+        try:
+            with session:
+                resp = session.put(url, headers=headers, data=payload)
+        except Exception as exc:
+            raise UpstreamTemporaryError(
+                f"upstream session error: {exc}",
+                error_type=self._classify_network_error_type(exc),
+            )
+        return resp
+
     def _get(self, url: str, headers: dict, timeout: int = 60):
         session = self._session()
         if session is None:
@@ -445,6 +493,61 @@ class AdobeClient:
                 error_type=self._classify_network_error_type(exc),
             )
         return resp
+
+    def _delete(self, url: str, headers: dict, timeout: int = 60):
+        session = self._session()
+        if session is None:
+            try:
+                return requests.delete(
+                    url,
+                    headers=headers,
+                    timeout=timeout,
+                    proxies=self._requests_proxies(),
+                )
+            except requests.Timeout as exc:
+                raise UpstreamTemporaryError(
+                    f"upstream timeout: {exc}", error_type="timeout"
+                )
+            except requests.ProxyError as exc:
+                raise UpstreamTemporaryError(
+                    f"upstream proxy error: {exc}", error_type="proxy"
+                )
+            except requests.ConnectionError as exc:
+                raise UpstreamTemporaryError(
+                    f"upstream connection error: {exc}", error_type="connection"
+                )
+            except requests.RequestException as exc:
+                raise UpstreamTemporaryError(
+                    f"upstream request error: {exc}", error_type="network"
+                )
+        try:
+            with session:
+                resp = session.delete(url, headers=headers)
+        except Exception as exc:
+            raise UpstreamTemporaryError(
+                f"upstream session error: {exc}",
+                error_type=self._classify_network_error_type(exc),
+            )
+        return resp
+
+    def _get_json(self, url: str, headers: dict, timeout: int = 60) -> Any:
+        resp = self._get(url, headers=headers, timeout=timeout)
+        if resp.status_code in (401, 403):
+            raise AuthError("Token invalid or expired")
+        if resp.status_code != 200:
+            if resp.status_code in (429, 451) or resp.status_code >= 500:
+                raise UpstreamTemporaryError(
+                    f"upstream get failed: {resp.status_code} {resp.text[:300]}",
+                    status_code=resp.status_code,
+                    error_type="status",
+                )
+            raise AdobeRequestError(
+                f"upstream get failed: {resp.status_code} {resp.text[:300]}"
+            )
+        try:
+            return resp.json()
+        except Exception:
+            raise AdobeRequestError("upstream get failed: invalid response")
 
     def _download_to_file(
         self,
@@ -521,6 +624,203 @@ class AdobeClient:
         if not image_id:
             raise AdobeRequestError("upload image succeeded but no image id returned")
         return str(image_id)
+
+    @staticmethod
+    def _json_or_empty(resp) -> Any:
+        if not str(getattr(resp, "text", "") or "").strip():
+            return {}
+        try:
+            return resp.json()
+        except Exception:
+            return {}
+
+    @staticmethod
+    def _entity_urn_from_data(data: Any) -> str:
+        if isinstance(data, dict):
+            for key in ("id", "urn", "entityId", "entityUrn"):
+                val = str(data.get(key) or "").strip()
+                if val:
+                    return val
+            entity = data.get("entity")
+            if isinstance(entity, dict):
+                return AdobeClient._entity_urn_from_data(entity)
+        return ""
+
+    def create_entity(
+        self,
+        token: str,
+        display_name: str,
+        entity_type: str = "character",
+        description: str = "",
+    ) -> dict:
+        name = str(display_name or "").strip()
+        if not name:
+            raise AdobeRequestError("entity displayName is required")
+        payload = {
+            "entityType": str(entity_type or "character").strip() or "character",
+            "entityValue": {
+                "displayName": name,
+                "description": str(description or ""),
+                "metaAttrs": None,
+            },
+        }
+        resp = self._post_json(self.entity_api_base, self._entity_headers(token), payload)
+        if resp.status_code in (401, 403):
+            raise AuthError("Token invalid or expired")
+        if resp.status_code not in (200, 201):
+            if resp.status_code in (429, 451) or resp.status_code >= 500:
+                raise UpstreamTemporaryError(
+                    f"create entity failed: {resp.status_code} {resp.text[:300]}",
+                    status_code=resp.status_code,
+                    error_type="status",
+                )
+            raise AdobeRequestError(
+                f"create entity failed: {resp.status_code} {resp.text[:300]}"
+            )
+        data = self._json_or_empty(resp)
+        if isinstance(data, dict):
+            urn = self._entity_urn_from_data(data)
+            if urn and "id" not in data:
+                data = {**data, "id": urn}
+            return data
+        return {}
+
+    def upload_entity_image(
+        self,
+        token: str,
+        repo_urn: str,
+        entity_name: str,
+        image_bytes: bytes,
+        mime_type: str = "image/png",
+    ) -> dict:
+        if not image_bytes:
+            raise AdobeRequestError("entity image is empty")
+        repo = str(repo_urn or "").strip()
+        name = str(entity_name or "").strip()
+        if not repo:
+            raise AdobeRequestError("repo_urn is required for entity image upload")
+        if not name:
+            raise AdobeRequestError("entity name is required for entity image upload")
+        component_id = str(uuid.uuid4())
+        url = (
+            f"{self.platform_cs_base}/{quote(repo, safe='')}/"
+            f"appassets/firefly/entities/{quote(name, safe='')}?component_id={component_id}"
+        )
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "x-api-key": self.api_key,
+            "content-type": mime_type,
+            "accept": "application/json",
+        }
+        resp = self._put_bytes(url, headers=headers, payload=image_bytes)
+        if resp.status_code in (401, 403):
+            raise AuthError("Token invalid or expired")
+        if resp.status_code not in (200, 201):
+            if resp.status_code in (429, 451) or resp.status_code >= 500:
+                raise UpstreamTemporaryError(
+                    f"upload entity image failed: {resp.status_code} {resp.text[:300]}",
+                    status_code=resp.status_code,
+                    error_type="status",
+                )
+            raise AdobeRequestError(
+                f"upload entity image failed: {resp.status_code} {resp.text[:300]}"
+            )
+
+        def header_val(*names: str) -> str:
+            for name_key in names:
+                val = str(resp.headers.get(name_key) or "").strip()
+                if val:
+                    return val
+            return ""
+
+        length_raw = header_val("resource-length", "content-length")
+        try:
+            length = int(length_raw)
+        except Exception:
+            length = len(image_bytes)
+        return {
+            "component_id": component_id,
+            "etag": header_val("etag"),
+            "version": header_val("revision", "x-revision"),
+            "md5": header_val("content-md5", "x-content-md5"),
+            "length": length,
+            "type": mime_type,
+        }
+
+    def register_entity_base_resources(
+        self, token: str, entity_urn: str, components: list[dict]
+    ) -> Any:
+        urn = str(entity_urn or "").strip()
+        if not urn:
+            raise AdobeRequestError("entity urn is required")
+        if not components:
+            raise AdobeRequestError("entity components are required")
+        url = f"{self.entity_api_base}{quote(urn, safe='')}/base-resources/"
+        body = []
+        for idx, comp in enumerate(components):
+            entry = {
+                "component": {
+                    "id": comp["component_id"],
+                    "type": comp["type"],
+                    "length": comp["length"],
+                    "etag": comp["etag"],
+                    "version": comp["version"],
+                    "md5": comp["md5"],
+                }
+            }
+            if idx == 0:
+                entry["is_primary"] = True
+            body.append(entry)
+        resp = self._post_json(url, self._entity_headers(token), body)
+        if resp.status_code in (401, 403):
+            raise AuthError("Token invalid or expired")
+        if resp.status_code not in (200, 201):
+            if resp.status_code in (429, 451) or resp.status_code >= 500:
+                raise UpstreamTemporaryError(
+                    f"register entity resources failed: {resp.status_code} {resp.text[:300]}",
+                    status_code=resp.status_code,
+                    error_type="status",
+                )
+            raise AdobeRequestError(
+                f"register entity resources failed: {resp.status_code} {resp.text[:300]}"
+            )
+        return self._json_or_empty(resp)
+
+    def list_entities(self, token: str, limit: int = 50) -> list[dict]:
+        safe_limit = max(1, min(int(limit or 50), 100))
+        data = self._get_json(
+            f"{self.entity_api_base}?limit={safe_limit}", self._entity_headers(token)
+        )
+        if isinstance(data, list):
+            return [item for item in data if isinstance(item, dict)]
+        if isinstance(data, dict):
+            for key in ("entities", "items", "data", "results"):
+                items = data.get(key)
+                if isinstance(items, list):
+                    return [item for item in items if isinstance(item, dict)]
+        return []
+
+    def delete_entity(self, token: str, entity_urn: str) -> bool:
+        urn = str(entity_urn or "").strip()
+        if not urn:
+            raise AdobeRequestError("entity urn is required")
+        resp = self._delete(
+            f"{self.entity_api_base}{quote(urn, safe='')}/",
+            self._entity_headers(token),
+        )
+        if resp.status_code in (401, 403):
+            raise AuthError("Token invalid or expired")
+        if resp.status_code in (200, 202, 204):
+            return True
+        if resp.status_code in (429, 451) or resp.status_code >= 500:
+            raise UpstreamTemporaryError(
+                f"delete entity failed: {resp.status_code} {resp.text[:300]}",
+                status_code=resp.status_code,
+                error_type="status",
+            )
+        raise AdobeRequestError(
+            f"delete entity failed: {resp.status_code} {resp.text[:300]}"
+        )
 
     def _build_payload_candidates(
         self,
@@ -715,6 +1015,7 @@ class AdobeClient:
         aspect_ratio: str,
         duration: int,
         source_image_ids: Optional[list[str]] = None,
+        entity_refs: Optional[list[dict]] = None,
         negative_prompt: str = "",
         generate_audio: bool = True,
         reference_mode: str = "frame",
@@ -766,6 +1067,43 @@ class AdobeClient:
                                 "promptReference": idx,
                             }
                         )
+            return payload
+
+        if engine == "kling-o3":
+            payload = {
+                "n": 1,
+                "seeds": [seed_val],
+                "modelId": "kling",
+                "modelVersion": "kling_o3_pro_reference_to_video",
+                "output": {"storeInputs": True},
+                "prompt": prompt,
+                "size": self._video_size(aspect_ratio, resolution),
+                "generateAudio": bool(generate_audio),
+                "generationMetadata": {
+                    "module": "image2video" if source_image_ids else "text2video"
+                },
+                "duration": int(duration),
+                "generationSettings": {"aspectRatio": aspect_ratio},
+                "referenceBlobs": [],
+            }
+            if source_image_ids:
+                for idx, image_id in enumerate(source_image_ids[:2], start=1):
+                    payload["referenceBlobs"].append(
+                        {"id": str(image_id), "usage": "frame", "order": idx}
+                    )
+            if entity_refs:
+                for ref in entity_refs:
+                    urn = str(ref.get("urn") or ref.get("id") or "").strip()
+                    mention_id = str(ref.get("mention_id") or "").strip()
+                    if not urn or not mention_id:
+                        continue
+                    payload["referenceBlobs"].append(
+                        {
+                            "usage": "element",
+                            "creativeCloudFileId": urn,
+                            "mention": {"id": mention_id},
+                        }
+                    )
             return payload
 
         payload = {
@@ -827,6 +1165,7 @@ class AdobeClient:
         aspect_ratio: str = "9:16",
         duration: int = 12,
         source_image_ids: Optional[list[str]] = None,
+        entity_refs: Optional[list[dict]] = None,
         timeout: int = 600,
         negative_prompt: str = "",
         generate_audio: bool = True,
@@ -840,6 +1179,7 @@ class AdobeClient:
             aspect_ratio=aspect_ratio,
             duration=duration,
             source_image_ids=source_image_ids,
+            entity_refs=entity_refs,
             negative_prompt=negative_prompt,
             generate_audio=generate_audio,
             reference_mode=reference_mode,

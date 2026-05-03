@@ -21,6 +21,7 @@ from starlette.background import BackgroundTask
 from starlette.middleware.sessions import SessionMiddleware
 
 from api.routes.admin import build_admin_router
+from api.routes.entity import build_entity_router
 from api.routes.generation import build_generation_router
 
 try:
@@ -1236,6 +1237,15 @@ app.include_router(
         auth_error_cls=AuthError,
         upstream_temp_error_cls=UpstreamTemporaryError,
         logger=logger,
+    )
+)
+
+app.include_router(
+    build_entity_router(
+        client=client,
+        token_manager=token_manager,
+        require_service_api_key=_require_service_api_key,
+        config_manager=config_manager,
     )
 )
 

@@ -1,3 +1,5 @@
+import re
+import secrets
 import threading
 import time
 import uuid
@@ -42,6 +44,56 @@ def build_generation_router(
     logger,
 ) -> APIRouter:
     router = APIRouter()
+    entity_ref_re = re.compile(r"@entity:([^\s@]+)")
+
+    def _nanoid(size: int = 21) -> str:
+        alphabet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz-_"
+        return "".join(secrets.choice(alphabet) for _ in range(size))
+
+    def _entity_name(item: dict) -> str:
+        entity_value = item.get("entityValue")
+        if isinstance(entity_value, dict):
+            name = str(entity_value.get("displayName") or "").strip()
+            if name:
+                return name
+        return str(item.get("name") or item.get("displayName") or "").strip()
+
+    def _entity_urn(item: dict) -> str:
+        for key in ("id", "urn", "entityId", "entityUrn"):
+            val = str(item.get(key) or "").strip()
+            if val:
+                return val
+        entity = item.get("entity")
+        if isinstance(entity, dict):
+            return _entity_urn(entity)
+        return ""
+
+    def _resolve_kling_entity_refs(token: str, raw_prompt: str) -> tuple[str, list[dict]]:
+        matches = list(entity_ref_re.finditer(raw_prompt or ""))
+        if not matches:
+            return raw_prompt, []
+        entities = client.list_entities(token, limit=100)
+        by_name = {_entity_name(item): item for item in entities if _entity_name(item)}
+        refs: list[dict] = []
+        replacements: dict[str, str] = {}
+        for match in matches:
+            name = match.group(1).strip()
+            if name in replacements:
+                continue
+            item = by_name.get(name)
+            if not item:
+                raise HTTPException(status_code=400, detail=f"entity not found: {name}")
+            urn = _entity_urn(item)
+            if not urn:
+                raise HTTPException(status_code=400, detail=f"entity has no urn: {name}")
+            mention_id = _nanoid()
+            replacements[name] = mention_id
+            refs.append({"name": name, "urn": urn, "mention_id": mention_id})
+
+        def replace_match(match: re.Match) -> str:
+            return f"@{replacements[match.group(1).strip()]}"
+
+        return entity_ref_re.sub(replace_match, raw_prompt), refs
 
     @router.get("/v1/models")
     def list_models(request: Request):
@@ -57,6 +109,8 @@ def build_generation_router(
                 }
             )
         for model_id, conf in video_model_catalog.items():
+            if bool(conf.get("hidden", False)):
+                continue
             data.append(
                 {
                     "id": model_id,
@@ -430,12 +484,13 @@ def build_generation_router(
             model_id.startswith("firefly-sora2")
             or model_id.startswith("firefly-veo31-fast")
             or model_id.startswith("firefly-veo31-")
+            or model_id.startswith("firefly-kling-")
         ) and model_id not in video_model_catalog:
             return JSONResponse(
                 status_code=400,
                 content={
                     "error": {
-                        "message": "Invalid video model. Use /v1/models to get supported firefly-sora2-*, firefly-veo31-* or firefly-veo31-fast-* models",
+                        "message": "Invalid video model. Use /v1/models to get supported firefly-sora2-*, firefly-veo31-*, firefly-veo31-fast-* or firefly-kling-* models",
                         "type": "invalid_request_error",
                     }
                 },
@@ -497,7 +552,10 @@ def build_generation_router(
                         max_video_inputs = 3
                     else:
                         max_video_inputs = (
-                            2 if video_engine in {"veo31-fast", "veo31-standard"} else 1
+                            2
+                            if video_engine
+                            in {"veo31-fast", "veo31-standard", "kling-o3"}
+                            else 1
                         )
                     if len(input_images) > max_video_inputs:
                         raise HTTPException(
@@ -533,13 +591,21 @@ def build_generation_router(
                     except Exception:
                         old_size = 0
 
+                    video_prompt = prompt
+                    entity_refs = None
+                    if video_engine == "kling-o3":
+                        video_prompt, entity_refs = _resolve_kling_entity_refs(
+                            token, prompt
+                        )
+
                     video_bytes, video_meta = client.generate_video(
                         token=token,
                         video_conf=video_conf or {},
-                        prompt=prompt,
+                        prompt=video_prompt,
                         aspect_ratio=ratio,
                         duration=duration,
                         source_image_ids=source_image_ids,
+                        entity_refs=entity_refs,
                         timeout=max(int(client.generate_timeout), 600),
                         negative_prompt=negative_prompt,
                         generate_audio=generate_audio,

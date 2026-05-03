@@ -584,6 +584,10 @@ def build_admin_router(
                     detail="gpt_image_quality must be one of: low, medium, high",
                 )
             update_data["gpt_image_quality"] = gpt_image_quality
+        if "entity_repo_urn" in incoming:
+            update_data["entity_repo_urn"] = str(
+                incoming["entity_repo_urn"] or ""
+            ).strip()
         effective_max = int(
             update_data.get(
                 "generated_max_size_mb",
