@@ -770,7 +770,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         confPublicBaseUrl.value = data.public_base_url || "";
         confUseProxy.checked = data.use_proxy || false;
         confProxy.value = data.proxy || "";
-        if (confFlaresolverrEnabled) confFlaresolverrEnabled.checked = Boolean(data.flaresolverr_enabled || false);
+        if (confFlaresolverrEnabled) confFlaresolverrEnabled.checked = Boolean(data.flaresolverr_enabled ?? true);
         if (confFlaresolverrUrl) confFlaresolverrUrl.value = data.flaresolverr_url || "http://127.0.0.1:8191/v1";
         if (confFlaresolverrTimeoutMs) confFlaresolverrTimeoutMs.value = Number(data.flaresolverr_max_timeout_ms || 60000);
         if (confFlaresolverrTriggerStatusCodes) {

@@ -13,7 +13,7 @@
   "retry_on_status_codes": [408, 429, 451, 500, 502, 503, 504],
   "retry_on_error_types": ["timeout", "connection", "proxy"],
   "token_rotation_strategy": "round_robin",
-  "flaresolverr_enabled": false,
+  "flaresolverr_enabled": true,
   "flaresolverr_url": "http://127.0.0.1:8191/v1",
   "flaresolverr_max_timeout_ms": 60000,
   "flaresolverr_use_proxy": true,

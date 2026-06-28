@@ -129,7 +129,7 @@ class AdobeClient:
         self.retry_on_error_types = {"timeout", "connection", "proxy"}
         self.token_rotation_strategy = "round_robin"
         self.gpt_image_quality = "low"
-        self.flaresolverr_enabled = False
+        self.flaresolverr_enabled = True
         self.flaresolverr_url = "http://127.0.0.1:8191/v1"
         self.flaresolverr_max_timeout_ms = 60000
         self.flaresolverr_use_proxy = True
@@ -251,7 +251,7 @@ class AdobeClient:
             strategy = "round_robin"
         self.token_rotation_strategy = strategy
 
-        self.flaresolverr_enabled = bool(cfg.get("flaresolverr_enabled", False))
+        self.flaresolverr_enabled = bool(cfg.get("flaresolverr_enabled", True))
         self.flaresolverr_url = str(
             cfg.get("flaresolverr_url", "http://127.0.0.1:8191/v1")
             or ""

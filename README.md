@@ -426,7 +426,7 @@ curl -X POST "http://127.0.0.1:6001/v1/images/generations" \
 
 上游返回 `408 {"error_code":"timeout_error","message":"system under load"}` 时，服务会把它按临时错误处理，并按「重试与容错」配置自动重试。默认可重试状态码包含 `408,429,451,500,502,503,504`。
 
-如果你怀疑某些账号遇到浏览器指纹或 Cloudflare 挑战，可以在管理后台「代理与网络」启用 FlareSolverr 回退：
+如果你怀疑某些账号遇到浏览器指纹或 Cloudflare 挑战，FlareSolverr 回退默认启用。可以在管理后台「代理与网络」确认 FlareSolverr API 地址：
 
 ```bash
 docker compose --profile flaresolverr up -d
