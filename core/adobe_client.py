@@ -125,16 +125,10 @@ class AdobeClient:
         self.retry_enabled = True
         self.retry_max_attempts = 3
         self.retry_backoff_seconds = 1.0
-        self.retry_on_status_codes = [408, 429, 451, 500, 502, 503, 504]
+        self.retry_on_status_codes = [429, 451, 500, 502, 503, 504]
         self.retry_on_error_types = {"timeout", "connection", "proxy"}
         self.token_rotation_strategy = "round_robin"
         self.gpt_image_quality = "low"
-        self.flaresolverr_enabled = True
-        self.flaresolverr_url = "http://127.0.0.1:8191/v1"
-        self.flaresolverr_max_timeout_ms = 60000
-        self.flaresolverr_use_proxy = True
-        self.flaresolverr_session = ""
-        self.flaresolverr_trigger_status_codes = [408, 429, 451, 503]
         self.user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
         self.sec_ch_ua = (
             '"Not:A-Brand";v="99", "Google Chrome";v="145", "Chromium";v="145"'
@@ -148,8 +142,6 @@ class AdobeClient:
         env_user_agent = os.getenv("ADOBE_USER_AGENT")
         env_sec_ch_ua = os.getenv("ADOBE_SEC_CH_UA")
         env_generate_timeout = os.getenv("ADOBE_GENERATE_TIMEOUT")
-        env_flaresolverr_url = os.getenv("FLARESOLVERR_URL")
-        env_flaresolverr_enabled = os.getenv("FLARESOLVERR_ENABLED")
 
         if env_api_key:
             self.api_key = env_api_key.strip() or self.api_key
@@ -168,15 +160,6 @@ class AdobeClient:
                     self.generate_timeout = 300
             except Exception:
                 pass
-        if env_flaresolverr_url:
-            self.flaresolverr_url = env_flaresolverr_url.strip() or self.flaresolverr_url
-        if env_flaresolverr_enabled is not None:
-            self.flaresolverr_enabled = str(env_flaresolverr_enabled).strip().lower() in {
-                "1",
-                "true",
-                "yes",
-                "on",
-            }
 
     def apply_config(self, cfg: dict) -> None:
         proxy = str(cfg.get("proxy", "")).strip()
@@ -206,7 +189,7 @@ class AdobeClient:
         self.retry_backoff_seconds = max(0.0, min(backoff, 30.0))
 
         status_codes_raw = cfg.get(
-            "retry_on_status_codes", [408, 429, 451, 500, 502, 503, 504]
+            "retry_on_status_codes", [429, 451, 500, 502, 503, 504]
         )
         parsed_status_codes: list[int] = []
         if isinstance(status_codes_raw, list):
@@ -218,7 +201,6 @@ class AdobeClient:
                 if 100 <= val <= 599:
                     parsed_status_codes.append(val)
         self.retry_on_status_codes = sorted(set(parsed_status_codes)) or [
-            408,
             429,
             451,
             500,
@@ -250,46 +232,10 @@ class AdobeClient:
         if strategy not in {"round_robin", "random"}:
             strategy = "round_robin"
         self.token_rotation_strategy = strategy
-
-        self.flaresolverr_enabled = bool(cfg.get("flaresolverr_enabled", True))
-        self.flaresolverr_url = str(
-            cfg.get("flaresolverr_url", "http://127.0.0.1:8191/v1")
-            or ""
-        ).strip() or "http://127.0.0.1:8191/v1"
-        try:
-            flaresolverr_timeout = int(
-                cfg.get("flaresolverr_max_timeout_ms", 60000)
-            )
-        except Exception:
-            flaresolverr_timeout = 60000
-        self.flaresolverr_max_timeout_ms = max(
-            1000, min(flaresolverr_timeout, 300000)
-        )
-        self.flaresolverr_use_proxy = bool(cfg.get("flaresolverr_use_proxy", True))
-        self.flaresolverr_session = str(
-            cfg.get("flaresolverr_session", "") or ""
-        ).strip()
-        raw_flaresolverr_codes = cfg.get(
-            "flaresolverr_trigger_status_codes", [408, 429, 451, 503]
-        )
-        parsed_flaresolverr_codes: list[int] = []
-        if isinstance(raw_flaresolverr_codes, list):
-            for item in raw_flaresolverr_codes:
-                try:
-                    val = int(item)
-                except Exception:
-                    continue
-                if 100 <= val <= 599:
-                    parsed_flaresolverr_codes.append(val)
-        self.flaresolverr_trigger_status_codes = sorted(
-            set(parsed_flaresolverr_codes)
-        ) or [408, 429, 451, 503]
         if self.proxy:
             logger.warning("proxy enabled for upstream requests: %s", self.proxy)
         else:
             logger.warning("proxy disabled for upstream requests")
-        if self.flaresolverr_enabled:
-            logger.warning("FlareSolverr fallback enabled: %s", self.flaresolverr_url)
 
     def _retry_delay_for_attempt(self, attempt: int) -> float:
         base = float(self.retry_backoff_seconds or 0.0)
@@ -310,197 +256,6 @@ class AdobeClient:
             if exc.error_type:
                 return exc.error_type in set(self.retry_on_error_types)
         return False
-
-    def _is_retryable_status(self, status_code: Optional[int]) -> bool:
-        try:
-            code = int(status_code or 0)
-        except Exception:
-            return False
-        if code in set(self.retry_on_status_codes):
-            return True
-        return code >= 500
-
-    def _is_temporary_response(self, resp) -> bool:
-        status_code = getattr(resp, "status_code", None)
-        if self._is_retryable_status(status_code):
-            return True
-        text = str(getattr(resp, "text", "") or "").lower()
-        return (
-            "timeout_error" in text
-            or "system under load" in text
-            or "temporarily unavailable" in text
-        )
-
-    @staticmethod
-    def _looks_like_cloudflare_challenge(resp) -> bool:
-        text = str(getattr(resp, "text", "") or "").lower()
-        headers = getattr(resp, "headers", {}) or {}
-        server = str(headers.get("server") or headers.get("Server") or "").lower()
-        return (
-            "cloudflare" in server
-            or "cf-ray" in {str(k).lower() for k in headers.keys()}
-            or "cf-chl" in text
-            or "challenge-platform" in text
-            or "checking your browser" in text
-            or "just a moment" in text
-        )
-
-    def _should_try_flaresolverr(self, resp) -> bool:
-        if not self.flaresolverr_enabled:
-            return False
-        try:
-            code = int(getattr(resp, "status_code", 0) or 0)
-        except Exception:
-            code = 0
-        if code in set(self.flaresolverr_trigger_status_codes):
-            return True
-        return self._looks_like_cloudflare_challenge(resp)
-
-    def _flaresolverr_proxy(self) -> Optional[dict]:
-        if not self.proxy or not self.flaresolverr_use_proxy:
-            return None
-        parsed = urlparse(self.proxy)
-        if not parsed.scheme or not parsed.hostname:
-            return None
-        proxy: dict[str, Any] = {
-            "url": f"{parsed.scheme}://{parsed.hostname}"
-            + (f":{parsed.port}" if parsed.port else "")
-        }
-        if parsed.username:
-            proxy["username"] = parsed.username
-        if parsed.password:
-            proxy["password"] = parsed.password
-        return proxy
-
-    def _flaresolverr_request(
-        self,
-        *,
-        method: str,
-        url: str,
-        headers: dict,
-        body: Any = None,
-    ) -> dict[str, Any]:
-        solver_url = self.flaresolverr_url.rstrip("/")
-        request_payload: dict[str, Any] = {
-            "cmd": "request.get",
-            "url": url,
-            "maxTimeout": int(self.flaresolverr_max_timeout_ms),
-        }
-        if self.flaresolverr_session:
-            request_payload["session"] = self.flaresolverr_session
-        proxy = self._flaresolverr_proxy()
-        if proxy:
-            request_payload["proxy"] = proxy
-
-        try:
-            solver_resp = requests.post(
-                solver_url,
-                json=request_payload,
-                timeout=max(5, int(self.flaresolverr_max_timeout_ms / 1000) + 10),
-            )
-            solver_resp.raise_for_status()
-            solver_data = solver_resp.json()
-        except requests.Timeout as exc:
-            raise UpstreamTemporaryError(
-                f"FlareSolverr timeout: {exc}", error_type="timeout"
-            )
-        except requests.ProxyError as exc:
-            raise UpstreamTemporaryError(
-                f"FlareSolverr proxy error: {exc}", error_type="proxy"
-            )
-        except requests.ConnectionError as exc:
-            raise UpstreamTemporaryError(
-                f"FlareSolverr connection error: {exc}", error_type="connection"
-            )
-        except requests.RequestException as exc:
-            raise UpstreamTemporaryError(
-                f"FlareSolverr request error: {exc}", error_type="network"
-            )
-        except Exception as exc:
-            raise UpstreamTemporaryError(
-                f"FlareSolverr invalid response: {exc}", error_type="network"
-            )
-
-        if str(solver_data.get("status") or "").lower() != "ok":
-            message = str(solver_data.get("message") or solver_data)[:300]
-            raise UpstreamTemporaryError(
-                f"FlareSolverr failed: {message}", error_type="challenge"
-            )
-
-        solution = solver_data.get("solution") or {}
-        return solution if isinstance(solution, dict) else {}
-
-    @staticmethod
-    def _headers_with_flaresolverr_solution(headers: dict, solution: dict) -> dict:
-        merged = dict(headers or {})
-        user_agent = str(solution.get("userAgent") or "").strip()
-        if user_agent:
-            for key in list(merged.keys()):
-                if str(key).lower() == "user-agent":
-                    merged.pop(key, None)
-            merged["user-agent"] = user_agent
-
-        cookies = solution.get("cookies") or []
-        cookie_parts: list[str] = []
-        if isinstance(cookies, list):
-            for item in cookies:
-                if not isinstance(item, dict):
-                    continue
-                name = str(item.get("name") or "").strip()
-                value = str(item.get("value") or "").strip()
-                if name:
-                    cookie_parts.append(f"{name}={value}")
-        if cookie_parts:
-            for key in list(merged.keys()):
-                if str(key).lower() == "cookie":
-                    merged.pop(key, None)
-            merged["cookie"] = "; ".join(cookie_parts)
-        return merged
-
-    def _flaresolverr_fallback(
-        self,
-        original_resp,
-        *,
-        method: str,
-        url: str,
-        headers: dict,
-        body: Any = None,
-    ):
-        try:
-            solution = self._flaresolverr_request(
-                method=method, url=url, headers=headers, body=body
-            )
-            retry_headers = self._headers_with_flaresolverr_solution(
-                headers, solution
-            )
-            if method.upper() == "POST":
-                return requests.post(
-                    url,
-                    headers=retry_headers,
-                    json=body,
-                    timeout=60,
-                    proxies=self._requests_proxies(),
-                )
-            return requests.get(
-                url,
-                headers=retry_headers,
-                timeout=60,
-                proxies=self._requests_proxies(),
-            )
-        except UpstreamTemporaryError as exc:
-            logger.warning(
-                "FlareSolverr fallback failed for %s %s: %s",
-                method,
-                url,
-                exc,
-            )
-            return original_resp
-        except requests.Timeout as exc:
-            logger.warning("FlareSolverr replay timed out for %s %s: %s", method, url, exc)
-            return original_resp
-        except requests.RequestException as exc:
-            logger.warning("FlareSolverr replay failed for %s %s: %s", method, url, exc)
-            return original_resp
 
     @staticmethod
     def _classify_network_error_type(exc: Exception) -> str:
@@ -605,27 +360,13 @@ class AdobeClient:
         session = self._session()
         if session is None:
             try:
-                resp = requests.post(
+                return requests.post(
                     url,
                     headers=headers,
                     json=payload,
                     timeout=60,
                     proxies=self._requests_proxies(),
                 )
-                if self._should_try_flaresolverr(resp):
-                    logger.warning(
-                        "POST %s status=%s matched FlareSolverr fallback",
-                        url,
-                        resp.status_code,
-                    )
-                    return self._flaresolverr_fallback(
-                        resp,
-                        method="POST",
-                        url=url,
-                        headers=headers,
-                        body=payload,
-                    )
-                return resp
             except requests.Timeout as exc:
                 raise UpstreamTemporaryError(
                     f"upstream timeout: {exc}", error_type="timeout"
@@ -650,42 +391,15 @@ class AdobeClient:
                 f"upstream session error: {exc}",
                 error_type=self._classify_network_error_type(exc),
             )
-        if self._should_try_flaresolverr(resp):
-            logger.warning(
-                "POST %s status=%s matched FlareSolverr fallback",
-                url,
-                resp.status_code,
-            )
-            return self._flaresolverr_fallback(
-                resp,
-                method="POST",
-                url=url,
-                headers=headers,
-                body=payload,
-            )
         if resp.status_code == 451:
             try:
-                fallback_resp = requests.post(
+                return requests.post(
                     url,
                     headers=headers,
                     json=payload,
                     timeout=60,
                     proxies=self._requests_proxies(),
                 )
-                if self._should_try_flaresolverr(fallback_resp):
-                    logger.warning(
-                        "POST %s status=%s matched FlareSolverr fallback after requests retry",
-                        url,
-                        fallback_resp.status_code,
-                    )
-                    return self._flaresolverr_fallback(
-                        fallback_resp,
-                        method="POST",
-                        url=url,
-                        headers=headers,
-                        body=payload,
-                    )
-                return fallback_resp
             except requests.Timeout as exc:
                 raise UpstreamTemporaryError(
                     f"upstream timeout: {exc}", status_code=451, error_type="timeout"
@@ -786,22 +500,12 @@ class AdobeClient:
         session = self._session()
         if session is None:
             try:
-                resp = requests.get(
+                return requests.get(
                     url,
                     headers=headers,
                     timeout=timeout,
                     proxies=self._requests_proxies(),
                 )
-                if self._should_try_flaresolverr(resp):
-                    logger.warning(
-                        "GET %s status=%s matched FlareSolverr fallback",
-                        url,
-                        resp.status_code,
-                    )
-                    return self._flaresolverr_fallback(
-                        resp, method="GET", url=url, headers=headers
-                    )
-                return resp
             except requests.Timeout as exc:
                 raise UpstreamTemporaryError(
                     f"upstream timeout: {exc}", error_type="timeout"
@@ -825,15 +529,6 @@ class AdobeClient:
             raise UpstreamTemporaryError(
                 f"upstream session error: {exc}",
                 error_type=self._classify_network_error_type(exc),
-            )
-        if self._should_try_flaresolverr(resp):
-            logger.warning(
-                "GET %s status=%s matched FlareSolverr fallback",
-                url,
-                resp.status_code,
-            )
-            return self._flaresolverr_fallback(
-                resp, method="GET", url=url, headers=headers
             )
         return resp
 
@@ -878,7 +573,7 @@ class AdobeClient:
         if resp.status_code in (401, 403):
             raise AuthError("Token invalid or expired")
         if resp.status_code != 200:
-            if self._is_temporary_response(resp):
+            if resp.status_code in (429, 451) or resp.status_code >= 500:
                 raise UpstreamTemporaryError(
                     f"upstream get failed: {resp.status_code} {resp.text[:300]}",
                     status_code=resp.status_code,
@@ -948,7 +643,7 @@ class AdobeClient:
         if resp.status_code in (401, 403):
             raise AuthError("Token invalid or expired")
         if resp.status_code != 200:
-            if self._is_temporary_response(resp):
+            if resp.status_code in (429, 451) or resp.status_code >= 500:
                 raise UpstreamTemporaryError(
                     f"upload image failed: {resp.status_code} {resp.text[:300]}",
                     status_code=resp.status_code,
@@ -1011,7 +706,7 @@ class AdobeClient:
         if resp.status_code in (401, 403):
             raise AuthError("Token invalid or expired")
         if resp.status_code not in (200, 201):
-            if self._is_temporary_response(resp):
+            if resp.status_code in (429, 451) or resp.status_code >= 500:
                 raise UpstreamTemporaryError(
                     f"create entity failed: {resp.status_code} {resp.text[:300]}",
                     status_code=resp.status_code,
@@ -1066,7 +761,7 @@ class AdobeClient:
         if resp.status_code in (401, 403):
             raise AuthError("Token invalid or expired")
         if resp.status_code not in (200, 201):
-            if self._is_temporary_response(resp):
+            if resp.status_code in (429, 451) or resp.status_code >= 500:
                 raise UpstreamTemporaryError(
                     f"upload entity image failed: {resp.status_code} {resp.text[:300]}",
                     status_code=resp.status_code,
@@ -1140,7 +835,7 @@ class AdobeClient:
         if resp.status_code in (401, 403):
             raise AuthError("Token invalid or expired")
         if resp.status_code not in (200, 201):
-            if self._is_temporary_response(resp):
+            if resp.status_code in (429, 451) or resp.status_code >= 500:
                 raise UpstreamTemporaryError(
                     f"register entity resources failed: {resp.status_code} {resp.text[:300]}",
                     status_code=resp.status_code,
@@ -1212,7 +907,7 @@ class AdobeClient:
             raise AuthError("Token invalid or expired")
         if resp.status_code in (200, 202, 204):
             return True
-        if self._is_temporary_response(resp):
+        if resp.status_code in (429, 451) or resp.status_code >= 500:
             raise UpstreamTemporaryError(
                 f"delete entity failed: {resp.status_code} {resp.text[:300]}",
                 status_code=resp.status_code,
@@ -1620,7 +1315,7 @@ class AdobeClient:
             raise AuthError("Token invalid or expired")
 
         if submit_resp.status_code != 200:
-            if self._is_temporary_response(submit_resp):
+            if submit_resp.status_code in (429, 451) or submit_resp.status_code >= 500:
                 raise UpstreamTemporaryError(
                     f"video submit failed: {submit_resp.status_code} {submit_resp.text[:300]}",
                     status_code=submit_resp.status_code,
@@ -1658,7 +1353,7 @@ class AdobeClient:
             if poll_resp.status_code in (401, 403):
                 raise AuthError("Token invalid or expired")
             if poll_resp.status_code != 200:
-                if self._is_temporary_response(poll_resp):
+                if poll_resp.status_code in (429, 451) or poll_resp.status_code >= 500:
                     raise UpstreamTemporaryError(
                         f"video poll failed: {poll_resp.status_code} {poll_resp.text[:300]}",
                         status_code=poll_resp.status_code,
@@ -1821,7 +1516,7 @@ class AdobeClient:
                 submit_resp.status_code,
                 submit_resp.text[:500],
             )
-            if self._is_temporary_response(submit_resp):
+            if submit_resp.status_code in (429, 451) or submit_resp.status_code >= 500:
                 raise UpstreamTemporaryError(
                     f"submit failed: {submit_resp.status_code} {submit_resp.text[:300]}",
                     status_code=submit_resp.status_code,
@@ -1868,7 +1563,7 @@ class AdobeClient:
                     poll_resp.status_code,
                     poll_resp.text[:500],
                 )
-                if self._is_temporary_response(poll_resp):
+                if poll_resp.status_code in (429, 451) or poll_resp.status_code >= 500:
                     raise UpstreamTemporaryError(
                         f"poll failed: {poll_resp.status_code} {poll_resp.text[:300]}",
                         status_code=poll_resp.status_code,

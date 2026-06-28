@@ -27,19 +27,13 @@ class ConfigManager:
             "retry_enabled": True,
             "retry_max_attempts": 3,
             "retry_backoff_seconds": 1.0,
-            "retry_on_status_codes": [408, 429, 451, 500, 502, 503, 504],
+            "retry_on_status_codes": [429, 451, 500, 502, 503, 504],
             "retry_on_error_types": ["timeout", "connection", "proxy"],
             "token_rotation_strategy": "round_robin",
             "batch_concurrency": 5,
             "generated_max_size_mb": 1024,
             "generated_prune_size_mb": 200,
             "gpt_image_quality": "low",
-            "flaresolverr_enabled": True,
-            "flaresolverr_url": "http://127.0.0.1:8191/v1",
-            "flaresolverr_max_timeout_ms": 60000,
-            "flaresolverr_use_proxy": True,
-            "flaresolverr_session": "",
-            "flaresolverr_trigger_status_codes": [408, 429, 451, 503],
         }
         self.load()
 
@@ -49,18 +43,9 @@ class ConfigManager:
             if source.exists():
                 try:
                     data = json.loads(source.read_text(encoding="utf-8"))
-                    had_flaresolverr_enabled = "flaresolverr_enabled" in data
                     for k, v in data.items():
                         if k in self.config:
                             self.config[k] = v
-                    old_retry_codes = [429, 451, 500, 502, 503, 504]
-                    if self.config.get("retry_on_status_codes") == old_retry_codes:
-                        self.config["retry_on_status_codes"] = [
-                            408,
-                            *old_retry_codes,
-                        ]
-                    if not had_flaresolverr_enabled:
-                        self.config["flaresolverr_enabled"] = True
                     if source == LEGACY_CONFIG_FILE and not CONFIG_FILE.exists():
                         CONFIG_FILE.write_text(
                             json.dumps(self.config, indent=2), encoding="utf-8"

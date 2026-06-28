@@ -679,12 +679,6 @@ document.addEventListener("DOMContentLoaded", async () => {
   const confPublicBaseUrl = document.getElementById("confPublicBaseUrl");
   const confUseProxy = document.getElementById("confUseProxy");
   const confProxy = document.getElementById("confProxy");
-  const confFlaresolverrEnabled = document.getElementById("confFlaresolverrEnabled");
-  const confFlaresolverrUrl = document.getElementById("confFlaresolverrUrl");
-  const confFlaresolverrTimeoutMs = document.getElementById("confFlaresolverrTimeoutMs");
-  const confFlaresolverrTriggerStatusCodes = document.getElementById("confFlaresolverrTriggerStatusCodes");
-  const confFlaresolverrUseProxy = document.getElementById("confFlaresolverrUseProxy");
-  const confFlaresolverrSession = document.getElementById("confFlaresolverrSession");
   const confGenerateTimeout = document.getElementById("confGenerateTimeout");
   const confGptImageQuality = document.getElementById("confGptImageQuality");
   const confRetryEnabled = document.getElementById("confRetryEnabled");
@@ -770,16 +764,6 @@ document.addEventListener("DOMContentLoaded", async () => {
         confPublicBaseUrl.value = data.public_base_url || "";
         confUseProxy.checked = data.use_proxy || false;
         confProxy.value = data.proxy || "";
-        if (confFlaresolverrEnabled) confFlaresolverrEnabled.checked = Boolean(data.flaresolverr_enabled ?? true);
-        if (confFlaresolverrUrl) confFlaresolverrUrl.value = data.flaresolverr_url || "http://127.0.0.1:8191/v1";
-        if (confFlaresolverrTimeoutMs) confFlaresolverrTimeoutMs.value = Number(data.flaresolverr_max_timeout_ms || 60000);
-        if (confFlaresolverrTriggerStatusCodes) {
-          confFlaresolverrTriggerStatusCodes.value = Array.isArray(data.flaresolverr_trigger_status_codes)
-            ? data.flaresolverr_trigger_status_codes.join(",")
-            : "408,429,451,503";
-        }
-        if (confFlaresolverrUseProxy) confFlaresolverrUseProxy.checked = Boolean(data.flaresolverr_use_proxy ?? true);
-        if (confFlaresolverrSession) confFlaresolverrSession.value = data.flaresolverr_session || "";
         confGenerateTimeout.value = Number(data.generate_timeout || 300);
         confGptImageQuality.value = String(data.gpt_image_quality || "low");
         confRetryEnabled.checked = Boolean(data.retry_enabled ?? true);
@@ -787,7 +771,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         confRetryBackoffSeconds.value = Number(data.retry_backoff_seconds ?? 1.0);
         confRetryOnStatusCodes.value = Array.isArray(data.retry_on_status_codes)
           ? data.retry_on_status_codes.join(",")
-          : "408,429,451,500,502,503,504";
+          : "429,451,500,502,503,504";
         confRetryOnErrorTypes.value = Array.isArray(data.retry_on_error_types)
           ? data.retry_on_error_types.join(",")
           : "timeout,connection,proxy";
@@ -823,15 +807,6 @@ document.addEventListener("DOMContentLoaded", async () => {
         public_base_url: confPublicBaseUrl.value.trim(),
         use_proxy: confUseProxy.checked,
         proxy: confProxy.value.trim(),
-        flaresolverr_enabled: Boolean(confFlaresolverrEnabled?.checked || false),
-        flaresolverr_url: String(confFlaresolverrUrl?.value || "http://127.0.0.1:8191/v1").trim(),
-        flaresolverr_max_timeout_ms: Math.max(1000, Math.min(300000, Number(confFlaresolverrTimeoutMs?.value || 60000))),
-        flaresolverr_trigger_status_codes: String(confFlaresolverrTriggerStatusCodes?.value || "")
-          .split(",")
-          .map(s => Number(String(s).trim()))
-          .filter(n => Number.isInteger(n) && n >= 100 && n <= 599),
-        flaresolverr_use_proxy: Boolean(confFlaresolverrUseProxy?.checked ?? true),
-        flaresolverr_session: String(confFlaresolverrSession?.value || "").trim(),
         generate_timeout: Math.max(1, Number(confGenerateTimeout.value || 300)),
         gpt_image_quality: String(confGptImageQuality.value || "low").trim().toLowerCase() || "low",
         retry_enabled: confRetryEnabled.checked,
@@ -882,12 +857,6 @@ document.addEventListener("DOMContentLoaded", async () => {
       }
       if (!Number.isFinite(payload.retry_backoff_seconds) || payload.retry_backoff_seconds < 0 || payload.retry_backoff_seconds > 30) {
         throw new Error("重试退避基数必须是 0-30 的数字");
-      }
-      if (payload.flaresolverr_url && !/^https?:\/\//i.test(payload.flaresolverr_url)) {
-        throw new Error("FlareSolverr API 地址必须以 http:// 或 https:// 开头");
-      }
-      if (!Number.isInteger(payload.flaresolverr_max_timeout_ms) || payload.flaresolverr_max_timeout_ms < 1000 || payload.flaresolverr_max_timeout_ms > 300000) {
-        throw new Error("FlareSolverr 超时必须是 1000-300000 的整数毫秒");
       }
       if (!["round_robin", "random"].includes(payload.token_rotation_strategy)) {
         throw new Error("Token 轮换策略无效");
