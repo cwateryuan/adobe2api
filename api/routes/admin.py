@@ -592,6 +592,67 @@ def build_admin_router(
                     detail="gpt_image_quality must be one of: low, medium, high",
                 )
             update_data["gpt_image_quality"] = gpt_image_quality
+        if "flaresolverr_enabled" in incoming:
+            update_data["flaresolverr_enabled"] = bool(incoming["flaresolverr_enabled"])
+        if "flaresolverr_url" in incoming:
+            flaresolverr_url = str(incoming["flaresolverr_url"] or "").strip()
+            if flaresolverr_url and not flaresolverr_url.lower().startswith(
+                ("http://", "https://")
+            ):
+                raise HTTPException(
+                    status_code=400,
+                    detail="flaresolverr_url must start with http:// or https://",
+                )
+            update_data["flaresolverr_url"] = (
+                flaresolverr_url or "http://127.0.0.1:8191/v1"
+            )
+        if "flaresolverr_max_timeout_ms" in incoming:
+            try:
+                flaresolverr_timeout = int(incoming["flaresolverr_max_timeout_ms"])
+            except Exception:
+                raise HTTPException(
+                    status_code=400,
+                    detail="flaresolverr_max_timeout_ms must be an integer between 1000 and 300000",
+                )
+            if flaresolverr_timeout < 1000 or flaresolverr_timeout > 300000:
+                raise HTTPException(
+                    status_code=400,
+                    detail="flaresolverr_max_timeout_ms must be between 1000 and 300000",
+                )
+            update_data["flaresolverr_max_timeout_ms"] = flaresolverr_timeout
+        if "flaresolverr_use_proxy" in incoming:
+            update_data["flaresolverr_use_proxy"] = bool(
+                incoming["flaresolverr_use_proxy"]
+            )
+        if "flaresolverr_session" in incoming:
+            update_data["flaresolverr_session"] = str(
+                incoming["flaresolverr_session"] or ""
+            ).strip()
+        if "flaresolverr_trigger_status_codes" in incoming:
+            raw_codes = incoming["flaresolverr_trigger_status_codes"] or []
+            if not isinstance(raw_codes, list):
+                raise HTTPException(
+                    status_code=400,
+                    detail="flaresolverr_trigger_status_codes must be a list",
+                )
+            status_codes: list[int] = []
+            for item in raw_codes:
+                try:
+                    code = int(item)
+                except Exception:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="flaresolverr_trigger_status_codes contains invalid value",
+                    )
+                if code < 100 or code > 599:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="flaresolverr_trigger_status_codes must be HTTP status codes",
+                    )
+                status_codes.append(code)
+            update_data["flaresolverr_trigger_status_codes"] = sorted(
+                set(status_codes)
+            )
         effective_max = int(
             update_data.get(
                 "generated_max_size_mb",

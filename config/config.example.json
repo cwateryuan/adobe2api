@@ -10,7 +10,13 @@
   "retry_enabled": true,
   "retry_max_attempts": 3,
   "retry_backoff_seconds": 1.0,
-  "retry_on_status_codes": [429, 451, 500, 502, 503, 504],
+  "retry_on_status_codes": [408, 429, 451, 500, 502, 503, 504],
   "retry_on_error_types": ["timeout", "connection", "proxy"],
-  "token_rotation_strategy": "round_robin"
+  "token_rotation_strategy": "round_robin",
+  "flaresolverr_enabled": false,
+  "flaresolverr_url": "http://127.0.0.1:8191/v1",
+  "flaresolverr_max_timeout_ms": 60000,
+  "flaresolverr_use_proxy": true,
+  "flaresolverr_session": "",
+  "flaresolverr_trigger_status_codes": [408, 429, 451, 503]
 }

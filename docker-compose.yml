@@ -16,3 +16,17 @@ services:
       # 持久化配置数据
       - ./config:/app/config
     restart: unless-stopped
+
+  # Optional: enable this with `docker compose --profile flaresolverr up -d`
+  # Then set FlareSolverr URL in the admin panel to http://flaresolverr:8191/v1
+  flaresolverr:
+    image: ghcr.io/flaresolverr/flaresolverr:latest
+    container_name: adobe2api-flaresolverr
+    profiles:
+      - flaresolverr
+    environment:
+      - TZ=Asia/Shanghai
+      - LOG_LEVEL=info
+    ports:
+      - "8191:8191"
+    restart: unless-stopped

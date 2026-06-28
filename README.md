@@ -422,6 +422,24 @@ curl -X POST "http://127.0.0.1:6001/v1/images/generations" \
   - `generated_prune_size_mb`（默认 `200`）
 - 当总大小超过 `generated_max_size_mb` 时，服务会删除旧文件，直到至少回收 `generated_prune_size_mb`且总大小降回阈值以内
 
+## 6）408 / Cloudflare 回退
+
+上游返回 `408 {"error_code":"timeout_error","message":"system under load"}` 时，服务会把它按临时错误处理，并按「重试与容错」配置自动重试。默认可重试状态码包含 `408,429,451,500,502,503,504`。
+
+如果你怀疑某些账号遇到浏览器指纹或 Cloudflare 挑战，可以在管理后台「代理与网络」启用 FlareSolverr 回退：
+
+```bash
+docker compose --profile flaresolverr up -d
+```
+
+然后在后台设置：
+
+- FlareSolverr API 地址：`http://flaresolverr:8191/v1`（Docker 内部）或 `http://127.0.0.1:8191/v1`（本机）
+- 代理服务器地址：填写你的代理，例如 `http://127.0.0.1:7890`
+- FlareSolverr 使用同一代理：按需开启
+
+FlareSolverr 只在直连返回触发状态码或疑似 Cloudflare 挑战时作为回退，不会替代默认的 `curl_cffi` 请求链路。
+
 ## Star History
 
 [![Star History Chart](https://api.star-history.com/svg?repos=leik1000/adobe2api&type=Date)](https://star-history.com/#leik1000/adobe2api&Date)

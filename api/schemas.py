@@ -45,6 +45,12 @@ class ConfigUpdateRequest(BaseModel):
     generated_max_size_mb: Optional[int] = None
     generated_prune_size_mb: Optional[int] = None
     gpt_image_quality: Optional[str] = None
+    flaresolverr_enabled: Optional[bool] = None
+    flaresolverr_url: Optional[str] = None
+    flaresolverr_max_timeout_ms: Optional[int] = None
+    flaresolverr_use_proxy: Optional[bool] = None
+    flaresolverr_session: Optional[str] = None
+    flaresolverr_trigger_status_codes: Optional[List[int]] = None
 
 
 class RefreshCookieImportRequest(BaseModel):
