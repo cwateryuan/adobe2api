@@ -1,4 +1,5 @@
 import time
+import requests
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -12,6 +13,7 @@ from api.schemas import (
     AdminLoginRequest,
     ConfigUpdateRequest,
     ExportSelectionRequest,
+    ProxyTestRequest,
     RefreshCookieBatchImportRequest,
     RefreshCookieImportRequest,
     RefreshProfileEnabledRequest,
@@ -614,6 +616,94 @@ def build_admin_router(
         config_manager.update_all(update_data)
         apply_client_config()
         return config_manager.get_all()
+
+    @router.post("/api/v1/proxy-test")
+    def proxy_test(req: ProxyTestRequest, request: Request):
+        require_admin_auth(request)
+
+        proxy_url = str(req.proxy or "").strip()
+        use_proxy = bool(req.use_proxy) if req.use_proxy is not None else True
+
+        if proxy_url:
+            resolved = proxy_url
+        else:
+            from core.adobe_client import _resolve_proxy
+            resolved = _resolve_proxy(
+                str(config_manager.get("proxy", "") or "").strip(),
+                bool(config_manager.get("use_proxy", False)),
+            )
+
+        if not resolved:
+            raise HTTPException(
+                status_code=400,
+                detail="未配置代理，请先设置代理地址",
+            )
+
+        from core.adobe_client import _requests_proxies_dict
+        proxies = _requests_proxies_dict(resolved)
+
+        test_urls = [
+            "https://www.google.com",
+            "https://httpbin.org/ip",
+            "https://firefly-3p.ff.adobe.io/v2/3p-images/generate-async",
+        ]
+
+        results = []
+        for test_url in test_urls:
+            start = time.time()
+            try:
+                resp = requests.get(test_url, timeout=10, proxies=proxies)
+                elapsed = round((time.time() - start) * 1000)
+                results.append({
+                    "url": test_url,
+                    "status": resp.status_code,
+                    "elapsed_ms": elapsed,
+                    "ok": True,
+                })
+            except requests.Timeout:
+                elapsed = round((time.time() - start) * 1000)
+                results.append({
+                    "url": test_url,
+                    "status": None,
+                    "elapsed_ms": elapsed,
+                    "ok": False,
+                    "error": "timeout",
+                })
+            except requests.ProxyError as exc:
+                elapsed = round((time.time() - start) * 1000)
+                results.append({
+                    "url": test_url,
+                    "status": None,
+                    "elapsed_ms": elapsed,
+                    "ok": False,
+                    "error": f"proxy_error: {str(exc)[:200]}",
+                })
+            except requests.ConnectionError as exc:
+                elapsed = round((time.time() - start) * 1000)
+                results.append({
+                    "url": test_url,
+                    "status": None,
+                    "elapsed_ms": elapsed,
+                    "ok": False,
+                    "error": f"connection_error: {str(exc)[:200]}",
+                })
+            except Exception as exc:
+                elapsed = round((time.time() - start) * 1000)
+                results.append({
+                    "url": test_url,
+                    "status": None,
+                    "elapsed_ms": elapsed,
+                    "ok": False,
+                    "error": str(exc)[:200],
+                })
+
+        all_ok = all(r["ok"] for r in results)
+
+        return {
+            "proxy": resolved,
+            "success": all_ok,
+            "results": results,
+        }
 
     @router.get("/api/v1/refresh-profiles")
     def refresh_profiles_list(request: Request):

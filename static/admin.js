@@ -679,6 +679,8 @@ document.addEventListener("DOMContentLoaded", async () => {
   const confPublicBaseUrl = document.getElementById("confPublicBaseUrl");
   const confUseProxy = document.getElementById("confUseProxy");
   const confProxy = document.getElementById("confProxy");
+  const proxyTestBtn = document.getElementById("proxyTestBtn");
+  const proxyTestResult = document.getElementById("proxyTestResult");
   const confGenerateTimeout = document.getElementById("confGenerateTimeout");
   const confGptImageQuality = document.getElementById("confGptImageQuality");
   const confRetryEnabled = document.getElementById("confRetryEnabled");
@@ -880,6 +882,35 @@ document.addEventListener("DOMContentLoaded", async () => {
       showToast(err.message || "保存失败", true);
     }
     saveConfigBtn.disabled = false;
+  });
+
+  proxyTestBtn.addEventListener("click", async () => {
+    proxyTestBtn.disabled = true;
+    proxyTestResult.style.display = "block";
+    proxyTestResult.textContent = "正在测试代理...";
+    proxyTestResult.className = "help";
+    try {
+      const proxy = confProxy.value.trim();
+      const useProxy = confUseProxy.checked;
+      const res = await fetch("/api/v1/proxy-test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ proxy, use_proxy: useProxy })
+      });
+      const data = await res.json();
+      if (data.success) {
+        proxyTestResult.className = "help success-msg";
+        proxyTestResult.textContent = `代理 ${data.proxy} 连接成功`;
+      } else {
+        const failures = data.results.filter(r => !r.ok);
+        proxyTestResult.className = "help error-msg";
+        proxyTestResult.textContent = `代理 ${data.proxy} 测试失败: ${failures.map(f => f.error || f.url).join("; ")}`;
+      }
+    } catch (err) {
+      proxyTestResult.className = "help error-msg";
+      proxyTestResult.textContent = "网络错误: " + (err.message || err);
+    }
+    proxyTestBtn.disabled = false;
   });
 
   function formatTs(ts) {

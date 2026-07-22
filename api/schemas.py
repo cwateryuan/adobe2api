@@ -68,3 +68,8 @@ class RefreshProfileEnabledRequest(BaseModel):
 class AdminLoginRequest(BaseModel):
     username: str
     password: str
+
+
+class ProxyTestRequest(BaseModel):
+    proxy: Optional[str] = None
+    use_proxy: Optional[bool] = True
