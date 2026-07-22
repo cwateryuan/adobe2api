@@ -35,6 +35,8 @@ from core.adobe_client import (
     AuthError,
     QuotaExhaustedError,
     UpstreamTemporaryError,
+    _resolve_proxy,
+    _requests_proxies_dict,
 )
 from core.token_mgr import token_manager
 from core.config_mgr import config_manager
@@ -971,7 +973,7 @@ def _load_input_images(messages) -> list[tuple[bytes, str]]:
                     status_code=400,
                     detail="Only http/https or data URL images are supported",
                 )
-            resp = requests.get(image_url, timeout=30)
+            resp = requests.get(image_url, timeout=30, proxies=_requests_proxies_dict(_resolve_proxy()))
             if resp.status_code != 200:
                 raise HTTPException(
                     status_code=400,

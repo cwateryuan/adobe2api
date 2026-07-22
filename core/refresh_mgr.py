@@ -8,6 +8,7 @@ from typing import Dict, List, Optional
 
 import requests
 
+from core.adobe_client import _resolve_proxy, _requests_proxies_dict
 from core.config_mgr import config_manager
 from core.token_mgr import token_manager
 
@@ -187,9 +188,8 @@ class RefreshManager:
     def _requests_proxies(self):
         proxy = str(config_manager.get("proxy", "") or "").strip()
         use_proxy = bool(config_manager.get("use_proxy", False))
-        if not (use_proxy and proxy):
-            return None
-        return {"http": proxy, "https": proxy}
+        resolved = _resolve_proxy(proxy, use_proxy)
+        return _requests_proxies_dict(resolved)
 
     def _summary_locked(self, profile: Dict) -> Dict:
         endpoint = profile.get("endpoint", {})

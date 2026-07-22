@@ -23,6 +23,29 @@ except Exception:
 logger = logging.getLogger("adobe2api")
 
 
+def _resolve_proxy(config_proxy: str = "", config_use_proxy: bool = False) -> str:
+
+    env_proxy = os.getenv("ADOBE_PROXY")
+    if env_proxy is not None:
+        return env_proxy.strip()
+
+    if config_use_proxy and str(config_proxy or "").strip():
+        return str(config_proxy).strip()
+
+    for key in ("HTTPS_PROXY", "HTTP_PROXY", "https_proxy", "http_proxy"):
+        val = os.getenv(key)
+        if val:
+            return val.strip()
+
+    return ""
+
+
+def _requests_proxies_dict(proxy_url: str) -> Optional[dict]:
+    if not proxy_url:
+        return None
+    return {"http": proxy_url, "https": proxy_url}
+
+
 def _decode_jwt_payload(token: str) -> dict[str, Any]:
     raw_token = str(token or "").strip()
     if not raw_token:
@@ -153,7 +176,6 @@ class AdobeClient:
 
         env_api_key = os.getenv("ADOBE_API_KEY")
         env_impersonate = os.getenv("ADOBE_IMPERSONATE")
-        env_proxy = os.getenv("ADOBE_PROXY")
         env_user_agent = os.getenv("ADOBE_USER_AGENT")
         env_sec_ch_ua = os.getenv("ADOBE_SEC_CH_UA")
         env_generate_timeout = os.getenv("ADOBE_GENERATE_TIMEOUT")
@@ -162,8 +184,6 @@ class AdobeClient:
             self.api_key = env_api_key.strip() or self.api_key
         if env_impersonate:
             self.impersonate = env_impersonate.strip() or self.impersonate
-        if env_proxy is not None:
-            self.proxy = env_proxy.strip()
         if env_user_agent:
             self.user_agent = env_user_agent.strip() or self.user_agent
         if env_sec_ch_ua:
@@ -175,6 +195,10 @@ class AdobeClient:
                     self.generate_timeout = 300
             except Exception:
                 pass
+
+        resolved = _resolve_proxy(self.proxy, True)
+        if resolved:
+            self.proxy = resolved
 
     def apply_config(self, cfg: dict) -> None:
         proxy = str(cfg.get("proxy", "")).strip()
@@ -291,16 +315,16 @@ class AdobeClient:
         return "network"
 
     def _requests_proxies(self) -> Optional[dict]:
-        if not self.proxy:
-            return None
-        return {"http": self.proxy, "https": self.proxy}
+        resolved = self.proxy or _resolve_proxy()
+        return _requests_proxies_dict(resolved)
 
     def _session(self):
         if CurlSession is None:
             return None
         kwargs = {"impersonate": self.impersonate, "timeout": 60}
-        if self.proxy:
-            kwargs["proxies"] = {"http": self.proxy, "https": self.proxy}
+        resolved = self.proxy or _resolve_proxy()
+        if resolved:
+            kwargs["proxies"] = _requests_proxies_dict(resolved)
         return CurlSession(**kwargs)
 
     def _browser_headers(self) -> dict:
