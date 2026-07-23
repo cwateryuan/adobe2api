@@ -189,6 +189,8 @@ def build_generation_router(
         require_service_api_key(request)
         data = []
         for model_id, conf in model_catalog.items():
+            if bool(conf.get("hidden", False)):
+                continue
             data.append(
                 {
                     "id": model_id,

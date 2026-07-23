@@ -43,6 +43,46 @@ GPT_IMAGE_RATIO_SUFFIX_MAP = {
     "2:3": "2x3",
 }
 
+GPT_IMAGE_MODEL_ID = "gpt-image-2"
+GPT_IMAGE_PIXEL_SIZES = {
+    "1K": {
+        "1:1": {"width": 1024, "height": 1024},
+        "5:4": {"width": 1120, "height": 896},
+        "9:16": {"width": 720, "height": 1280},
+        "21:9": {"width": 1456, "height": 624},
+        "16:9": {"width": 1280, "height": 720},
+        "4:3": {"width": 1152, "height": 864},
+        "3:2": {"width": 1248, "height": 832},
+        "4:5": {"width": 896, "height": 1120},
+        "3:4": {"width": 864, "height": 1152},
+        "2:3": {"width": 832, "height": 1248},
+    },
+    "2K": {
+        "1:1": {"width": 2048, "height": 2048},
+        "5:4": {"width": 2240, "height": 1792},
+        "9:16": {"width": 1440, "height": 2560},
+        "21:9": {"width": 3024, "height": 1296},
+        "16:9": {"width": 2560, "height": 1440},
+        "4:3": {"width": 2304, "height": 1728},
+        "3:2": {"width": 2496, "height": 1664},
+        "4:5": {"width": 1792, "height": 2240},
+        "3:4": {"width": 1728, "height": 2304},
+        "2:3": {"width": 1664, "height": 2496},
+    },
+    "4K": {
+        "1:1": {"width": 2880, "height": 2880},
+        "5:4": {"width": 3200, "height": 2560},
+        "9:16": {"width": 2160, "height": 3840},
+        "21:9": {"width": 3696, "height": 1584},
+        "16:9": {"width": 3840, "height": 2160},
+        "4:3": {"width": 3264, "height": 2448},
+        "3:2": {"width": 3504, "height": 2336},
+        "4:5": {"width": 2560, "height": 3200},
+        "3:4": {"width": 2448, "height": 3264},
+        "2:3": {"width": 2336, "height": 3504},
+    },
+}
+
 MODEL_CATALOG: dict[str, dict] = {}
 
 
@@ -78,7 +118,16 @@ def _register_gpt_image_family() -> None:
                 "output_resolution": res.upper(),
                 "aspect_ratio": ratio,
                 "description": f"Firefly GPT Image ({res.upper()} {ratio})",
+                "hidden": True,
             }
+
+    MODEL_CATALOG[GPT_IMAGE_MODEL_ID] = {
+        "upstream_model": "openai:firefly:gpt-image",
+        "upstream_model_id": "gpt-image",
+        "upstream_model_version": "2",
+        "output_resolution": "1K",
+        "description": "GPT Image 2 (automatic size routing)",
+    }
 
 
 _register_nano_banana_family(

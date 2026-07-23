@@ -71,7 +71,7 @@ Current supported model families are:
 - `firefly-nano-banana-*` (image, maps to upstream `nano-banana-2`)
 - `firefly-nano-banana2-*` (image, maps to upstream `nano-banana-3`)
 - `firefly-nano-banana-pro-*` (image)
-- `firefly-gpt-image-*` (image, maps to upstream `gpt-image:2`)
+- `gpt-image-2` (image, routes by requested size, maps to upstream `gpt-image:2`)
 - `firefly-sora2-*` (video)
 - `firefly-sora2-pro-*` (video)
 - `firefly-veo31-*` (video)
@@ -115,21 +115,20 @@ Nano Banana Pro image models (legacy-compatible):
 
 GPT Image models (experimental):
 
-- Pattern: `firefly-gpt-image-{resolution}-{ratio}`
-- Resolution: `1k` / `2k` / `4k`
-- Ratio suffix: `1x1` / `5x4` / `9x16` / `21x9` / `16x9` / `4x3` / `3x2` / `4x5` / `3x4` / `2x3`
-- The implementation sends both `outputResolution` and the mapped pixel `size`
+- Model ID: `gpt-image-2`
+- The requested pixel count first selects the `1K` / `2K` / `4K` billing tier whose existing canvases are nearest, then the closest supported aspect ratio
+- `size` only accepts `<width>x<height>` or `<width>X<height>` without spaces; both dimensions must be positive integers no greater than `3840`
+- A missing `size` or the exact value `auto` defaults to `1024x1024`
+- Example: both `1026x1026` and `1026X1026` route to the 1K `1024x1024` canvas
+- `size` takes precedence over `aspect_ratio` and resolution-like request `quality` values
+- Legacy `firefly-gpt-image-{resolution}-{ratio}` IDs are hidden from `/v1/models` but remain callable with their fixed size behavior
+- Upstream requests include the routed `outputResolution` and matching pixel `size`
 - GPT Image quality is controlled by system config `gpt_image_quality`: `low` / `medium` / `high`, default `low`
-- Examples:
-  - `firefly-gpt-image-2k-16x9`
-  - `firefly-gpt-image-4k-1x1`
-  - `firefly-gpt-image-2k-21x9`
 
 About `auto`:
 
-- Current implementation does **not** support `aspect_ratio=auto`
-- If `auto` is sent, the service falls back to `1:1`
-- Prefer sending an explicit ratio or using a model ID with a ratio suffix
+- `gpt-image-2` supports `size=auto` and treats it as `1024x1024`
+- Other models keep the existing `aspect_ratio=auto` behavior and fall back to `1:1`
 
 Sora2 video models:
 

@@ -69,7 +69,7 @@ docker compose up -d --build
 - `firefly-nano-banana-*`（图像，对应上游 `nano-banana-2`）
 - `firefly-nano-banana2-*`（图像，对应上游 `nano-banana-3`）
 - `firefly-nano-banana-pro-*`（图像）
-- `firefly-gpt-image-*`（图像，对应上游 `gpt-image:2`）
+- `gpt-image-2`（图像，按请求尺寸自动路由，对应上游 `gpt-image:2`）
 - `firefly-sora2-*`（视频）
 - `firefly-sora2-pro-*`（视频）
 - `firefly-veo31-*`（视频）
@@ -114,21 +114,20 @@ Nano Banana Pro 图像模型（兼容旧命名）：
 
 GPT Image 图像模型（实验接入）：
 
-- 命名：`firefly-gpt-image-{resolution}-{ratio}`
-- 分辨率：`1k` / `2k` / `4k`
-- 比例后缀：`1x1` / `5x4` / `9x16` / `21x9` / `16x9` / `4x3` / `3x2` / `4x5` / `3x4` / `2x3`
-- 当前实现会携带 `outputResolution` 和对应像素 `size`
+- 模型 ID：`gpt-image-2`
+- 使用请求中的总像素数匹配与各档位现有画布最接近的 `1K` / `2K` / `4K` 收费档位，再匹配最接近的支持比例
+- `size` 仅接受无空格的 `<宽>x<高>` 或 `<宽>X<高>`，宽高必须为正整数且均不超过 `3840`
+- 未提供 `size` 或传入精确值 `auto` 时使用 `1024x1024`
+- 示例：`1026x1026` 和 `1026X1026` 均路由到 `1K` 的 `1024x1024`
+- 请求中的 `size` 优先于 `aspect_ratio` 和分辨率性质的 `quality`
+- 旧 `firefly-gpt-image-{resolution}-{ratio}` ID 不再出现在 `/v1/models`，但仍可调用并保持固定尺寸行为
+- 上游请求会携带匹配后的 `outputResolution` 和对应像素 `size`
 - GPT Image 质量由系统配置 `gpt_image_quality` 控制：`low` / `medium` / `high`，默认 `low`
-- 示例：
-  - `firefly-gpt-image-2k-16x9`
-  - `firefly-gpt-image-4k-1x1`
-  - `firefly-gpt-image-2k-21x9`
 
 关于 `auto`：
 
-- 当前实现 **不支持** `aspect_ratio=auto`
-- 如果请求里传入 `auto`，服务端会回退为 `1:1`
-- 请显式传具体比例，或直接使用带比例后缀的模型 ID
+- `gpt-image-2` 支持 `size=auto`，并将其视为 `1024x1024`
+- 其他模型的 `aspect_ratio=auto` 行为保持不变：回退为 `1:1`
 
 Sora2 视频模型：
 

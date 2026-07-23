@@ -1,10 +1,23 @@
 from __future__ import annotations
 
+import math
+import re
 from typing import Optional
 
 from fastapi import HTTPException
 
-from .catalog import DEFAULT_MODEL_ID, MODEL_CATALOG, SUPPORTED_RATIOS
+from .catalog import (
+    DEFAULT_MODEL_ID,
+    GPT_IMAGE_MODEL_ID,
+    GPT_IMAGE_PIXEL_SIZES,
+    MODEL_CATALOG,
+    SUPPORTED_RATIOS,
+)
+
+
+_GPT_IMAGE_SIZE_RE = re.compile(r"([0-9]+)[xX]([0-9]+)\Z")
+_GPT_IMAGE_MAX_EDGE = 3840
+_GPT_IMAGE_LEVELS = ("1K", "2K", "4K")
 
 
 def resolve_model(model_id: Optional[str]) -> dict:
@@ -30,9 +43,62 @@ def ratio_from_size(size: str) -> str:
     return mapping.get(str(size or "").strip(), "1:1")
 
 
+def resolve_gpt_image_size(size: object) -> tuple[str, str]:
+    if size is None or size == "auto":
+        size = "1024x1024"
+    if not isinstance(size, str):
+        raise HTTPException(status_code=400, detail="size must use WIDTHxHEIGHT format")
+
+    match = _GPT_IMAGE_SIZE_RE.fullmatch(size)
+    if match is None:
+        raise HTTPException(status_code=400, detail="size must use WIDTHxHEIGHT format")
+
+    try:
+        width, height = (int(value) for value in match.groups())
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400, detail="size dimensions must be valid integers"
+        ) from exc
+    if width <= 0 or height <= 0:
+        raise HTTPException(status_code=400, detail="size dimensions must be positive")
+    if width > _GPT_IMAGE_MAX_EDGE or height > _GPT_IMAGE_MAX_EDGE:
+        raise HTTPException(
+            status_code=400,
+            detail=f"size dimensions must not exceed {_GPT_IMAGE_MAX_EDGE}",
+        )
+
+    requested_pixels = width * height
+    output_resolution = min(
+        _GPT_IMAGE_LEVELS,
+        key=lambda level: min(
+            abs(requested_pixels - dimensions["width"] * dimensions["height"])
+            for dimensions in GPT_IMAGE_PIXEL_SIZES[level].values()
+        ),
+    )
+
+    requested_ratio = width / height
+    ratio = min(
+        GPT_IMAGE_PIXEL_SIZES[output_resolution],
+        key=lambda candidate: abs(
+            math.log(
+                requested_ratio
+                / (
+                    GPT_IMAGE_PIXEL_SIZES[output_resolution][candidate]["width"]
+                    / GPT_IMAGE_PIXEL_SIZES[output_resolution][candidate]["height"]
+                )
+            )
+        ),
+    )
+    return ratio, output_resolution
+
+
 def resolve_ratio_and_resolution(
     data: dict, model_id: Optional[str]
 ) -> tuple[str, str, str]:
+    if model_id == GPT_IMAGE_MODEL_ID:
+        ratio, output_resolution = resolve_gpt_image_size(data.get("size"))
+        return ratio, output_resolution, GPT_IMAGE_MODEL_ID
+
     ratio = str(data.get("aspect_ratio") or "").strip() or ratio_from_size(
         data.get("size", "1024x1024")
     )
