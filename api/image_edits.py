@@ -10,7 +10,8 @@ from starlette.datastructures import UploadFile
 
 
 MAX_EDIT_IMAGES = 6
-MAX_EDIT_IMAGE_BYTES = 10 * 1024 * 1024
+MAX_EDIT_IMAGE_MB = 20
+MAX_EDIT_IMAGE_BYTES = MAX_EDIT_IMAGE_MB * 1024 * 1024
 OUTPUT_FORMAT_EXTENSIONS = {
     "png": "png",
     "jpeg": "jpg",
@@ -84,7 +85,10 @@ async def parse_image_edit_request(
             if not image_bytes:
                 raise HTTPException(status_code=400, detail="multipart image is empty")
             if len(image_bytes) > MAX_EDIT_IMAGE_BYTES:
-                raise HTTPException(status_code=400, detail="image too large, max 10MB")
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"image too large, max {MAX_EDIT_IMAGE_MB}MB",
+                )
             images.append((image_bytes, _image_mime(image_bytes)))
     finally:
         for upload in uploads:

@@ -368,7 +368,7 @@ curl -X POST "http://127.0.0.1:6001/v1/images/generations" \
 
 ### 3.5 图像编辑接口：`/v1/images/edits`
 
-该接口仅接受 `multipart/form-data`。可以重复使用 `image` 字段上传最多 6 张 JPEG、PNG 或 WebP 图片，每张最大 10MB；不接受 JSON URL 图片输入。
+该接口仅接受 `multipart/form-data`。可以重复使用 `image` 字段上传最多 6 张 JPEG、PNG 或 WebP 图片，每张最大 20MB；不接受 JSON URL 图片输入。
 
 ```bash
 curl -X POST "http://127.0.0.1:6001/v1/images/edits" \

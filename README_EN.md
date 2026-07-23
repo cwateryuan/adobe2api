@@ -294,7 +294,7 @@ curl -X POST "http://127.0.0.1:6001/v1/images/generations" \
 
 ### 3.4 Image edits endpoint: `/v1/images/edits`
 
-This endpoint only accepts `multipart/form-data`. Repeat the `image` field to upload up to 6 JPEG, PNG, or WebP images, with a 10MB limit per image. JSON URL image input is not supported.
+This endpoint only accepts `multipart/form-data`. Repeat the `image` field to upload up to 6 JPEG, PNG, or WebP images, with a 20MB limit per image. JSON URL image input is not supported.
 
 ```bash
 curl -X POST "http://127.0.0.1:6001/v1/images/edits" \

@@ -9,6 +9,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from PIL import Image
 
+from api.image_edits import MAX_EDIT_IMAGE_BYTES
 from api.routes.generation import build_generation_router
 from core.models import (
     MODEL_CATALOG,
@@ -57,6 +58,9 @@ class FakeClient:
 
 
 class ImageEditsEndpointTests(unittest.TestCase):
+    def test_multipart_image_limit_is_twenty_mb(self):
+        self.assertEqual(MAX_EDIT_IMAGE_BYTES, 20 * 1024 * 1024)
+
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.generated_dir = Path(self.temp_dir.name)
