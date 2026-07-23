@@ -19,6 +19,7 @@ Current design:
 
 - External unified entry: `/v1/chat/completions` (image + video)
 - Optional image-only endpoint: `/v1/images/generations`
+- OpenAI-compatible image edits endpoint: `/v1/images/edits` (multipart only)
 - Token pool management (manual token + auto-refresh token)
 - Admin web UI: token/config/logs/refresh profile import
 
@@ -290,6 +291,28 @@ curl -X POST "http://127.0.0.1:6001/v1/images/generations" \
     "prompt": "futuristic city skyline at dusk"
   }'
 ```
+
+### 3.4 Image edits endpoint: `/v1/images/edits`
+
+This endpoint only accepts `multipart/form-data`. Repeat the `image` field to upload up to 6 JPEG, PNG, or WebP images, with a 10MB limit per image. JSON URL image input is not supported.
+
+```bash
+curl -X POST "http://127.0.0.1:6001/v1/images/edits" \
+  -H "Authorization: Bearer <service_api_key>" \
+  -F "image=@./input.png" \
+  -F "model=gpt-image-2" \
+  -F "prompt=replace the man with a woman" \
+  -F "size=1254x1254" \
+  -F "quality=high" \
+  -F "output_format=webp" \
+  -F "n=2" \
+  -F "response_format=url"
+```
+
+- `n`: `1`–`10`
+- `output_format`: `png` / `jpeg` / `jpg` / `webp`
+- `response_format`: `url` / `b64_json`
+- `gpt-image-2` uses the same strict `size` syntax and automatic routing as `/v1/images/generations`
 
 ## 4) Cookie Import
 

@@ -1,3 +1,4 @@
+import base64
 import re
 import secrets
 import threading
@@ -9,7 +10,14 @@ from typing import Any, Callable
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
+from starlette.concurrency import run_in_threadpool
 
+from api.image_edits import (
+    OUTPUT_FORMAT_EXTENSIONS,
+    convert_generated_image,
+    parse_image_edit_options,
+    parse_image_edit_request,
+)
 from api.schemas import GenerateRequest
 from core.entity_store import entity_store
 
@@ -50,6 +58,62 @@ def build_generation_router(
     def _nanoid(size: int = 21) -> str:
         alphabet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz-_"
         return "".join(secrets.choice(alphabet) for _ in range(size))
+
+    def _image_edit_error_response(request: Request, exc: Exception) -> JSONResponse:
+        include_traceback = False
+        if isinstance(exc, quota_error_cls):
+            status_code = 429
+            message = "Token quota exhausted"
+            error_type = "rate_limit_error"
+        elif isinstance(exc, auth_error_cls):
+            status_code = 401
+            message = "Token invalid or expired"
+            error_type = "authentication_error"
+        elif isinstance(exc, upstream_temp_error_cls):
+            status_code = 503
+            message = str(exc)
+            error_type = "server_error"
+        elif isinstance(exc, HTTPException):
+            status_code = int(exc.status_code)
+            message = str(exc.detail)
+            error_type = (
+                "invalid_request_error"
+                if 400 <= status_code < 500
+                else "server_error"
+            )
+        else:
+            status_code = 500
+            message = str(exc)
+            error_type = "server_error"
+            include_traceback = True
+            logger.exception(
+                "Unhandled error in /v1/images/edits log_id=%s",
+                getattr(request.state, "log_id", ""),
+            )
+
+        error_code = set_request_error_detail(
+            request,
+            error=exc if include_traceback else message,
+            status_code=status_code,
+            error_type=error_type,
+            include_traceback=include_traceback,
+        )
+        set_request_task_progress(
+            request,
+            task_status="FAILED",
+            task_progress=0.0,
+            error=message,
+        )
+        return JSONResponse(
+            status_code=status_code,
+            content={
+                "error": {
+                    "message": message,
+                    "type": error_type,
+                    "code": error_code,
+                }
+            },
+        )
 
     def _entity_name(item: dict) -> str:
         entity_value = item.get("entityValue")
@@ -435,6 +499,142 @@ def build_generation_router(
                     }
                 },
             )
+
+    @router.post("/v1/images/edits")
+    async def openai_edit(request: Request):
+        require_service_api_key(request)
+
+        try:
+            data, input_images = await parse_image_edit_request(request)
+            prompt, n, output_format, response_format, quality = (
+                parse_image_edit_options(data)
+            )
+            model_id = str(data.get("model") or "").strip() or None
+            request.state.log_model = model_id
+            request.state.log_prompt_preview = prompt[:240]
+
+            if model_id in video_model_catalog:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Video models are not supported by /v1/images/edits",
+                )
+
+            ratio, output_resolution, resolved_model_id = (
+                resolve_ratio_and_resolution(data, model_id)
+            )
+            model_conf = resolve_model(resolved_model_id)
+            set_request_task_progress(
+                request, task_status="IN_PROGRESS", task_progress=0.0
+            )
+
+            def _run_once(token: str):
+                source_image_ids = [
+                    client.upload_image(token, image_bytes, image_mime)
+                    for image_bytes, image_mime in input_images
+                ]
+                response_data: list[dict] = []
+                preview_url = ""
+
+                for index in range(n):
+                    def _image_progress_cb(update: dict, item_index: int = index):
+                        item_progress = update.get("task_progress")
+                        aggregate_progress = None
+                        if item_progress is not None:
+                            aggregate_progress = (
+                                (item_index + float(item_progress) / 100.0) / n
+                            ) * 100.0
+                        set_request_task_progress(
+                            request,
+                            task_status=str(
+                                update.get("task_status") or "IN_PROGRESS"
+                            ),
+                            task_progress=aggregate_progress,
+                            upstream_job_id=update.get("upstream_job_id"),
+                            retry_after=update.get("retry_after"),
+                            error=update.get("error"),
+                        )
+
+                    job_id = uuid.uuid4().hex
+                    source_path = generated_dir / f"{job_id}.source"
+                    extension = OUTPUT_FORMAT_EXTENSIONS[output_format]
+                    out_path = generated_dir / f"{job_id}.{extension}"
+                    old_size = 0
+                    try:
+                        image_bytes, _meta = client.generate(
+                            token=token,
+                            prompt=prompt,
+                            aspect_ratio=ratio,
+                            output_resolution=output_resolution,
+                            upstream_model_id=str(
+                                model_conf.get("upstream_model_id") or "gemini-flash"
+                            ),
+                            upstream_model_version=str(
+                                model_conf.get("upstream_model_version")
+                                or "nano-banana-2"
+                            ),
+                            quality_level=(
+                                (
+                                    client.gpt_image_quality
+                                    if quality == "auto"
+                                    else quality
+                                )
+                                if str(model_conf.get("upstream_model_id") or "")
+                                == "gpt-image"
+                                else None
+                            ),
+                            detail_level=model_conf.get("detail_level"),
+                            source_image_ids=source_image_ids,
+                            timeout=client.generate_timeout,
+                            out_path=source_path,
+                            progress_cb=_image_progress_cb,
+                        )
+                        if image_bytes is not None:
+                            source_path.write_bytes(image_bytes)
+                        if not source_path.exists():
+                            raise HTTPException(
+                                status_code=500,
+                                detail="upstream returned no generated image",
+                            )
+                        convert_generated_image(source_path, out_path, output_format)
+                    finally:
+                        try:
+                            source_path.unlink(missing_ok=True)
+                        except Exception:
+                            pass
+
+                    new_size = int(out_path.stat().st_size)
+                    on_generated_file_written(out_path, old_size, new_size)
+                    image_url = public_generated_url(request, out_path.name)
+                    if not preview_url:
+                        preview_url = image_url
+                    if response_format == "b64_json":
+                        response_data.append(
+                            {
+                                "b64_json": base64.b64encode(
+                                    out_path.read_bytes()
+                                ).decode("ascii")
+                            }
+                        )
+                    else:
+                        response_data.append({"url": image_url})
+
+                if preview_url:
+                    set_request_preview(request, preview_url, kind="image")
+                return {
+                    "created": int(time.time()),
+                    "model": resolved_model_id,
+                    "data": response_data,
+                }
+
+            return await run_in_threadpool(
+                lambda: run_with_token_retries(
+                    request=request,
+                    operation_name="images.edits",
+                    run_once=_run_once,
+                )
+            )
+        except Exception as exc:
+            return _image_edit_error_response(request, exc)
 
     @router.post("/api/v1/generate")
     def create_job(data: GenerateRequest, request: Request):

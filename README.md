@@ -17,6 +17,7 @@ English README: `README_EN.md`
 
 - 对外统一入口：`/v1/chat/completions`（图像 + 视频）
 - 可选图像专用接口：`/v1/images/generations`
+- OpenAI 兼容图像编辑接口：`/v1/images/edits`（仅 multipart）
 - Token 池管理（手动 Token + 自动刷新 Token）
 - 管理后台 Web UI：Token / 配置 / 日志 / 刷新配置导入
 
@@ -364,6 +365,28 @@ curl -X POST "http://127.0.0.1:6001/v1/images/generations" \
     "prompt": "futuristic city skyline at dusk"
   }'
 ```
+
+### 3.5 图像编辑接口：`/v1/images/edits`
+
+该接口仅接受 `multipart/form-data`。可以重复使用 `image` 字段上传最多 6 张 JPEG、PNG 或 WebP 图片，每张最大 10MB；不接受 JSON URL 图片输入。
+
+```bash
+curl -X POST "http://127.0.0.1:6001/v1/images/edits" \
+  -H "Authorization: Bearer <service_api_key>" \
+  -F "image=@./input.png" \
+  -F "model=gpt-image-2" \
+  -F "prompt=把男性换成女性" \
+  -F "size=1254x1254" \
+  -F "quality=high" \
+  -F "output_format=webp" \
+  -F "n=2" \
+  -F "response_format=url"
+```
+
+- `n`：`1`–`10`
+- `output_format`：`png` / `jpeg` / `jpg` / `webp`
+- `response_format`：`url` / `b64_json`
+- `gpt-image-2` 的 `size` 使用与 `/v1/images/generations` 相同的严格格式和自动路由规则
 
 ## 4）Cookie 导入
 

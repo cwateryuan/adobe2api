@@ -216,6 +216,7 @@ def _set_request_error_detail(
     op_map = {
         "/v1/chat/completions": "chat.completions",
         "/v1/images/generations": "images.generations",
+        "/v1/images/edits": "images.edits",
         "/api/v1/generate": "api.generate",
     }
     path = str(getattr(getattr(request, "url", None), "path", "") or "")
@@ -433,6 +434,7 @@ async def request_logger(request: Request, call_next):
     op_map = {
         "/v1/chat/completions": "chat.completions",
         "/v1/images/generations": "images.generations",
+        "/v1/images/edits": "images.edits",
         "/v1/entities": "entities.create" if method == "POST" else "",
     }
     operation = op_map.get(path, "")
@@ -440,17 +442,22 @@ async def request_logger(request: Request, call_next):
 
     if method in {"POST", "PUT", "PATCH"} and should_log:
         try:
-            raw_body = await request.body()
-            request._body = raw_body
-            if path in {
-                "/v1/images/generations",
-                "/v1/chat/completions",
-                "/v1/entities",
-                "/api/v1/generate",
-            }:
-                body_meta = _extract_logging_fields(raw_body)
-                request.state.log_model = body_meta.get("model")
-                request.state.log_prompt_preview = body_meta.get("prompt_preview")
+            is_multipart_edit = path == "/v1/images/edits" and str(
+                request.headers.get("content-type") or ""
+            ).lower().startswith("multipart/form-data")
+            if not is_multipart_edit:
+                raw_body = await request.body()
+                request._body = raw_body
+                if path in {
+                    "/v1/images/generations",
+                    "/v1/images/edits",
+                    "/v1/chat/completions",
+                    "/v1/entities",
+                    "/api/v1/generate",
+                }:
+                    body_meta = _extract_logging_fields(raw_body)
+                    request.state.log_model = body_meta.get("model")
+                    request.state.log_prompt_preview = body_meta.get("prompt_preview")
             request.state.log_id = uuid.uuid4().hex[:12]
             log_id = str(getattr(request.state, "log_id", "") or "")
             if log_id:
@@ -557,8 +564,10 @@ async def request_logger(request: Request, call_next):
                             operation=operation,
                             preview_url=preview_url,
                             preview_kind=preview_kind,
-                            model=body_meta.get("model"),
-                            prompt_preview=body_meta.get("prompt_preview"),
+                            model=body_meta.get("model")
+                            or getattr(request.state, "log_model", None),
+                            prompt_preview=body_meta.get("prompt_preview")
+                            or getattr(request.state, "log_prompt_preview", None),
                             error=error_final,
                             error_code=error_code,
                             task_status=task_status,
