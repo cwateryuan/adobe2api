@@ -1190,4 +1190,230 @@ def build_generation_router(
                 },
             )
 
+    @router.post("/v1/video/generations")
+    def video_generations(data: dict, request: Request):
+        require_service_api_key(request)
+
+        model_id = str(data.get("model") or "").strip()
+        prompt = str(data.get("prompt") or "").strip()
+        if not prompt:
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "error": {
+                        "message": "prompt is required",
+                        "type": "invalid_request_error",
+                    }
+                },
+            )
+
+        _sd_match = None
+        if model_id.startswith("firefly-seedance-") and model_id not in video_model_catalog:
+            _sd_match = re.match(
+                r"^firefly-seedance-(fast|2\.0)-(\d+)s-(\d+x\d+)-(\d+p)$",
+                model_id,
+            )
+            if _sd_match:
+                dur = int(_sd_match.group(2))
+                if dur < 5 or dur > 15:
+                    return JSONResponse(
+                        status_code=400,
+                        content={
+                            "error": {
+                                "message": "Seedance duration must be between 5s and 15s",
+                                "type": "invalid_request_error",
+                            }
+                        },
+                    )
+
+        if (
+            model_id.startswith("firefly-sora2")
+            or model_id.startswith("firefly-veo31-fast")
+            or model_id.startswith("firefly-veo31-")
+            or model_id.startswith("firefly-kling-")
+            or model_id.startswith("firefly-seedance-")
+        ) and model_id not in video_model_catalog and not _sd_match:
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "error": {
+                        "message": "Invalid video model. Use /v1/models to get supported models",
+                        "type": "invalid_request_error",
+                    }
+                },
+            )
+
+        video_conf = video_model_catalog.get(model_id)
+        if video_conf is None and _sd_match:
+            ratio_suffix = _sd_match.group(3)
+            ratio = {v: k for k, v in RATIO_SUFFIX_MAP.items()}.get(
+                ratio_suffix, ratio_suffix.replace("x", ":", 1)
+            )
+            video_conf = {
+                "engine": f"seedance-{_sd_match.group(1)}",
+                "upstream_model": (
+                    "seedance:firefly:colligo:v2.0"
+                    if _sd_match.group(1) == "2.0"
+                    else "seedance:firefly:colligo:v1.0-fast"
+                ),
+                "duration": dur,
+                "aspect_ratio": ratio,
+                "resolution": _sd_match.group(4),
+            }
+        if video_conf is None:
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "error": {
+                        "message": f"Unsupported video model: {model_id}",
+                        "type": "invalid_request_error",
+                    }
+                },
+            )
+
+        ratio = str(video_conf.get("aspect_ratio") or "9:16")
+        duration_val = int(video_conf.get("duration") or 12)
+        video_resolution = str(video_conf.get("resolution") or "720p")
+        video_engine = str(video_conf.get("engine") or "sora2")
+        generate_audio = True
+        negative_prompt = str(data.get("negative_prompt") or "").strip()
+        video_reference_mode = str(video_conf.get("reference_mode") or "frame")
+        resolved_video_options = resolve_video_options(data)
+        if isinstance(resolved_video_options, tuple) and len(resolved_video_options) == 3:
+            generate_audio, negative_prompt, requested_reference_mode = resolved_video_options
+            if "reference_mode" not in (video_conf or {}):
+                video_reference_mode = requested_reference_mode
+        else:
+            generate_audio, negative_prompt = resolved_video_options
+        if not any(k in data for k in ("generate_audio", "generateAudio")):
+            generate_audio = bool(video_conf.get("generate_audio", generate_audio))
+
+        entity_account_id = ""
+        kling_bound_refs = None
+        if video_engine == "kling-o3":
+            entity_account_id, kling_bound_refs = _resolve_entity_bindings(prompt)
+
+        input_images = load_input_images(data.get("messages") or [])
+
+        task = store.create_video(
+            prompt=prompt, model=model_id, aspect_ratio=ratio, duration=duration_val
+        )
+
+        def _generate_thread():
+            try:
+                if entity_account_id:
+                    token = token_manager.get_available_for_account(
+                        entity_account_id, strategy=client.token_rotation_strategy
+                    )
+                else:
+                    token = token_manager.get_available(
+                        strategy=client.token_rotation_strategy
+                    )
+                if not token:
+                    store.update(task.id, status="failed", error="No available token")
+                    return
+
+                source_image_ids = []
+                max_video_inputs = (
+                    3
+                    if video_engine == "veo31-standard" and video_reference_mode == "image"
+                    else (
+                        2
+                        if video_engine
+                        in {"veo31-fast", "veo31-standard", "kling-o3", "kling3", "seedance-fast", "seedance-2.0"}
+                        else 1
+                    )
+                )
+                for image_bytes, _image_mime in input_images[:max_video_inputs]:
+                    prepared_bytes, prepared_mime = prepare_video_source_image(
+                        image_bytes, ratio, video_resolution,
+                    )
+                    source_image_ids.append(
+                        client.upload_image(token, prepared_bytes, prepared_mime)
+                    )
+
+                video_prompt = prompt
+                entity_refs = None
+                if video_engine == "kling-o3":
+                    video_prompt, entity_refs = _resolve_kling_entity_refs(
+                        token, prompt, kling_bound_refs
+                    )
+
+                tmp_path = generated_dir / f"video_{task.id}.mp4"
+
+                def _video_progress_cb(update: dict):
+                    try:
+                        pct = float(update.get("task_progress") or 0)
+                        store.update(task.id, status="running", progress=pct)
+                    except Exception:
+                        pass
+
+                store.update(task.id, status="running", progress=0.0)
+
+                video_bytes, video_meta = client.generate_video(
+                    token=token,
+                    video_conf=video_conf or {},
+                    prompt=video_prompt,
+                    aspect_ratio=ratio,
+                    duration=duration_val,
+                    source_image_ids=source_image_ids,
+                    entity_refs=entity_refs,
+                    timeout=max(int(client.generate_timeout), 600),
+                    negative_prompt=negative_prompt,
+                    generate_audio=generate_audio,
+                    reference_mode=video_reference_mode,
+                    out_path=tmp_path,
+                    progress_cb=_video_progress_cb,
+                )
+
+                if video_bytes is None and tmp_path.exists():
+                    video_bytes = tmp_path.read_bytes()
+
+                ext = video_ext_from_meta(video_meta)
+                save_path = generated_dir / f"video_{task.id}.{ext}"
+                if video_bytes:
+                    save_path.parent.mkdir(parents=True, exist_ok=True)
+                    save_path.write_bytes(video_bytes)
+                elif not save_path.exists():
+                    raise Exception("video generation returned no data")
+
+                video_url = public_generated_url(request, save_path.name)
+                store.update(
+                    task.id,
+                    status="succeeded",
+                    progress=100.0,
+                    video_url=video_url,
+                )
+            except Exception as exc:
+                store.update(task.id, status="failed", error=str(exc)[:500], progress=0.0)
+
+        threading.Thread(target=_generate_thread, daemon=True).start()
+
+        return {
+            "task_id": task.id,
+            "status": "queued",
+            "model": model_id,
+        }
+
+    @router.get("/v1/video/generations/{task_id}")
+    def video_task_status(task_id: str, request: Request):
+        require_service_api_key(request)
+        task = store.get(task_id)
+        if task is None:
+            raise HTTPException(status_code=404, detail="task not found")
+        resp = {
+            "task_id": task.id,
+            "status": task.status,
+            "progress": task.progress,
+            "model": task.model,
+            "prompt": task.prompt,
+        }
+        if task.video_url:
+            resp["video_url"] = task.video_url
+        if task.error:
+            resp["error"] = task.error
+        if task.duration:
+            resp["duration"] = task.duration
+        return resp
+
     return router

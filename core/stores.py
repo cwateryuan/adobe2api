@@ -12,11 +12,15 @@ from typing import Optional
 class JobRecord:
     id: str
     prompt: str
-    aspect_ratio: str
+    model: str = ""
+    aspect_ratio: str = "9:16"
+    task_type: str = "image"
     status: str = "queued"
     progress: float = 0.0
     image_url: Optional[str] = None
+    video_url: Optional[str] = None
     error: Optional[str] = None
+    duration: Optional[int] = None
     created_at: float = 0.0
     updated_at: float = 0.0
 
@@ -33,12 +37,29 @@ class JobStore:
             for item in sorted_items[:50]:
                 self._items.pop(item.id, None)
 
-    def create(self, prompt: str, aspect_ratio: str) -> JobRecord:
+    def create(self, prompt: str, aspect_ratio: str = "9:16") -> JobRecord:
         now = time.time()
         item = JobRecord(
             id=uuid.uuid4().hex,
             prompt=prompt,
             aspect_ratio=aspect_ratio,
+            created_at=now,
+            updated_at=now,
+        )
+        with self._lock:
+            self._cleanup()
+            self._items[item.id] = item
+        return item
+
+    def create_video(self, prompt: str, model: str, aspect_ratio: str = "9:16", duration: int = 12) -> JobRecord:
+        now = time.time()
+        item = JobRecord(
+            id=uuid.uuid4().hex,
+            prompt=prompt,
+            model=model,
+            aspect_ratio=aspect_ratio,
+            task_type="video",
+            duration=duration,
             created_at=now,
             updated_at=now,
         )
