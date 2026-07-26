@@ -1278,7 +1278,7 @@ class AdobeClient:
 
         if engine in {"seedance-2.0", "seedance-fast"}:
             model_version = (
-                "seedance_2.0" if engine == "seedance-2.0" else "seedance_1.0_fast"
+                "seedance_2.0" if engine == "seedance-2.0" else "seedance_2.0_fast"
             )
             neg_prompt = str(negative_prompt or "").strip()
             if not neg_prompt:
