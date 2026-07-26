@@ -261,28 +261,30 @@ for dur in (5, 10, 15):
             "description": f"Firefly Kling 3.0 video model ({dur}s {ratio} 720p)",
         }
 
-# Seedance Fast (5s/10s/15s x 16:9/9:16 x 720p)
-for dur in (5, 10, 15):
-    for ratio in ("16:9", "9:16"):
-        model_id = f"firefly-seedance-fast-{dur}s-{RATIO_SUFFIX_MAP[ratio]}-720p"
+# Seedance Fast (5s–15s x 16:9/9:16/1:1 x 720p)
+for dur in range(5, 16):
+    for ratio in ("16:9", "9:16", "1:1"):
+        rs = RATIO_SUFFIX_MAP.get(ratio, ratio.replace(":", "x"))
+        model_id = f"firefly-seedance-fast-{dur}s-{rs}-720p"
         VIDEO_MODEL_CATALOG[model_id] = {
             "engine": "seedance-fast",
             "upstream_model": "seedance:firefly:colligo:v1.0-fast",
             "duration": dur,
             "aspect_ratio": ratio,
             "resolution": "720p",
-            "description": f"Firefly Seedance Fast video model ({dur}s {ratio} 720p)",
+            "description": f"Firefly Seedance Fast ({dur}s {ratio} 720p)",
         }
 
-# Seedance 2.0 (5s/10s/15s x 16:9/9:16 x 720p)
-for dur in (5, 10, 15):
-    for ratio in ("16:9", "9:16"):
-        model_id = f"firefly-seedance-2.0-{dur}s-{RATIO_SUFFIX_MAP[ratio]}-720p"
+# Seedance 2.0 (5s–15s x 16:9/9:16/1:1 x 720p)
+for dur in range(5, 16):
+    for ratio in ("16:9", "9:16", "1:1"):
+        rs = RATIO_SUFFIX_MAP.get(ratio, ratio.replace(":", "x"))
+        model_id = f"firefly-seedance-2.0-{dur}s-{rs}-720p"
         VIDEO_MODEL_CATALOG[model_id] = {
             "engine": "seedance-2.0",
             "upstream_model": "seedance:firefly:colligo:v2.0",
             "duration": dur,
             "aspect_ratio": ratio,
             "resolution": "720p",
-            "description": f"Firefly Seedance 2.0 video model ({dur}s {ratio} 720p)",
+            "description": f"Firefly Seedance 2.0 ({dur}s {ratio} 720p)",
         }

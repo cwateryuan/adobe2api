@@ -20,6 +20,7 @@ from api.image_edits import (
 )
 from api.schemas import GenerateRequest
 from core.entity_store import entity_store
+from core.models.catalog import RATIO_SUFFIX_MAP
 
 
 def build_generation_router(
@@ -771,13 +772,33 @@ def build_generation_router(
             )
 
         model_id = str(data.get("model") or "").strip()
+
+        _sd_match = None
+        if model_id.startswith("firefly-seedance-") and model_id not in video_model_catalog:
+            _sd_match = re.match(
+                r"^firefly-seedance-(fast|2\.0)-(\d+)s-(\d+x\d+)-(\d+p)$",
+                model_id,
+            )
+            if _sd_match:
+                dur = int(_sd_match.group(2))
+                if dur < 5 or dur > 15:
+                    return JSONResponse(
+                        status_code=400,
+                        content={
+                            "error": {
+                                "message": "Seedance duration must be between 5s and 15s",
+                                "type": "invalid_request_error",
+                            }
+                        },
+                    )
+
         if (
             model_id.startswith("firefly-sora2")
             or model_id.startswith("firefly-veo31-fast")
             or model_id.startswith("firefly-veo31-")
             or model_id.startswith("firefly-kling-")
             or model_id.startswith("firefly-seedance-")
-        ) and model_id not in video_model_catalog:
+        ) and model_id not in video_model_catalog and not _sd_match:
             return JSONResponse(
                 status_code=400,
                 content={
@@ -788,6 +809,22 @@ def build_generation_router(
                 },
             )
         video_conf = video_model_catalog.get(model_id)
+        if video_conf is None and _sd_match:
+
+            ratio_suffix = _sd_match.group(3)
+            ratio = {v: k for k, v in RATIO_SUFFIX_MAP.items()}.get(ratio_suffix, ratio_suffix.replace("x", ":", 1))
+            video_conf = {
+                "engine": f"seedance-{_sd_match.group(1)}",
+                "upstream_model": (
+                    f"seedance:firefly:colligo:v2.0"
+                    if _sd_match.group(1) == "2.0"
+                    else "seedance:firefly:colligo:v1.0-fast"
+                ),
+                "duration": dur,
+                "aspect_ratio": ratio,
+                "resolution": _sd_match.group(4),
+                "description": f"Firefly Seedance {_sd_match.group(1)} ({dur}s {ratio} {_sd_match.group(4)})",
+            }
         is_video_model = video_conf is not None
         resolved_model_id = model_id if is_video_model else None
         ratio = "9:16"
