@@ -1015,10 +1015,28 @@ def _prepare_video_source_image(
         )
 
     res = str(resolution or "720p").lower()
+    ar = str(aspect_ratio or "16:9").strip()
     if res == "1080p":
-        target_size = (1920, 1080) if aspect_ratio == "16:9" else (1080, 1920)
+        if ar == "16:9":
+            target_size = (1920, 1080)
+        elif ar == "1:1":
+            target_size = (1080, 1080)
+        else:
+            target_size = (1080, 1920)
+    elif res == "480p":
+        if ar == "16:9":
+            target_size = (854, 480)
+        elif ar == "1:1":
+            target_size = (480, 480)
+        else:
+            target_size = (480, 854)
     else:
-        target_size = (1280, 720) if aspect_ratio == "16:9" else (720, 1280)
+        if ar == "16:9":
+            target_size = (1280, 720)
+        elif ar == "1:1":
+            target_size = (720, 720)
+        else:
+            target_size = (720, 1280)
     try:
         with Image.open(io.BytesIO(image_bytes)) as src:
             src = src.convert("RGB")

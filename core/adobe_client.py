@@ -978,11 +978,26 @@ class AdobeClient:
     @staticmethod
     def _video_size(aspect_ratio: str, resolution: str = "720p") -> dict:
         res = str(resolution or "720p").lower()
+        ar = str(aspect_ratio or "16:9").strip()
         if res == "1080p":
-            if aspect_ratio == "16:9":
+            if ar == "16:9":
                 return {"width": 1920, "height": 1080}
+            if ar == "1:1":
+                return {"width": 1080, "height": 1080}
             return {"width": 1080, "height": 1920}
-        if aspect_ratio == "16:9":
+        if res == "720p":
+            if ar == "16:9":
+                return {"width": 1280, "height": 720}
+            if ar == "1:1":
+                return {"width": 720, "height": 720}
+            return {"width": 720, "height": 1280}
+        if res == "480p":
+            if ar == "16:9":
+                return {"width": 854, "height": 480}
+            if ar == "1:1":
+                return {"width": 480, "height": 480}
+            return {"width": 480, "height": 854}
+        if ar == "16:9":
             return {"width": 1280, "height": 720}
         return {"width": 720, "height": 1280}
 
@@ -1243,6 +1258,33 @@ class AdobeClient:
                 "seeds": [seed_val],
                 "modelId": "kling",
                 "modelVersion": "kling_v3_standard_i2v",
+                "output": {"storeInputs": True},
+                "prompt": prompt,
+                "size": self._video_size(aspect_ratio, resolution),
+                "generateAudio": bool(generate_audio),
+                "generationMetadata": {
+                    "module": "image2video" if source_image_ids else "text2video"
+                },
+                "duration": int(duration),
+                "generationSettings": {"aspectRatio": aspect_ratio},
+                "referenceBlobs": [],
+            }
+            if source_image_ids:
+                for idx, image_id in enumerate(source_image_ids[:2], start=1):
+                    payload["referenceBlobs"].append(
+                        {"id": str(image_id), "usage": "frame", "order": idx}
+                    )
+            return payload
+
+        if engine in {"seedance-2.0", "seedance-fast"}:
+            model_version = (
+                "seedance-v2.0" if engine == "seedance-2.0" else "seedance-v1.0-fast"
+            )
+            payload = {
+                "n": 1,
+                "seeds": [seed_val],
+                "modelId": "seedance",
+                "modelVersion": model_version,
                 "output": {"storeInputs": True},
                 "prompt": prompt,
                 "size": self._video_size(aspect_ratio, resolution),
