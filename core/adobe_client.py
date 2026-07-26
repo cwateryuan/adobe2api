@@ -1278,25 +1278,31 @@ class AdobeClient:
 
         if engine in {"seedance-2.0", "seedance-fast"}:
             model_version = (
-                "seedance-v2.0" if engine == "seedance-2.0" else "seedance-v1.0-fast"
+                "seedance_2.0" if engine == "seedance-2.0" else "seedance_1.0_fast"
             )
+            neg_prompt = str(negative_prompt or "").strip()
+            if not neg_prompt:
+                neg_prompt = "cartoon, vector art, & bad aesthetics & poor aesthetic"
             payload = {
-                "n": 1,
-                "seeds": [seed_val],
-                "modelId": "firefly-video",
+                "modelId": "seedance",
                 "modelVersion": model_version,
-                "output": {"storeInputs": True},
-                "prompt": prompt,
                 "size": self._video_size(aspect_ratio, resolution),
+                "seeds": [seed_val],
+                "prompt": prompt,
+                "negativePrompt": neg_prompt,
+                "duration": int(duration),
                 "generateAudio": bool(generate_audio),
                 "generationMetadata": {
-                    "module": "image2video" if source_image_ids else "text2video"
+                    "module": "image2video" if source_image_ids else "text2video",
+                    "submodule": "ff-video-generate",
                 },
-                "duration": int(duration),
-                "generationSettings": {"aspectRatio": aspect_ratio},
-                "referenceBlobs": [],
+                "generationSettings": {
+                    "aspectRatio": aspect_ratio,
+                },
+                "output": {"storeInputs": True},
             }
             if source_image_ids:
+                payload["referenceBlobs"] = []
                 for idx, image_id in enumerate(source_image_ids[:2], start=1):
                     payload["referenceBlobs"].append(
                         {"id": str(image_id), "usage": "frame", "order": idx}

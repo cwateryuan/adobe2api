@@ -268,7 +268,7 @@ for dur in range(5, 16):
         model_id = f"firefly-seedance-fast-{dur}s-{rs}-720p"
         VIDEO_MODEL_CATALOG[model_id] = {
             "engine": "seedance-fast",
-            "upstream_model": "seedance:firefly:colligo:v1.0-fast",
+            "upstream_model": "seedance:firefly:v1.0-fast",
             "duration": dur,
             "aspect_ratio": ratio,
             "resolution": "720p",
@@ -282,7 +282,7 @@ for dur in range(5, 16):
         model_id = f"firefly-seedance-2.0-{dur}s-{rs}-720p"
         VIDEO_MODEL_CATALOG[model_id] = {
             "engine": "seedance-2.0",
-            "upstream_model": "seedance:firefly:colligo:v2.0",
+            "upstream_model": "seedance:firefly:v2.0",
             "duration": dur,
             "aspect_ratio": ratio,
             "resolution": "720p",
