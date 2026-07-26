@@ -1283,7 +1283,7 @@ class AdobeClient:
             payload = {
                 "n": 1,
                 "seeds": [seed_val],
-                "modelId": "seedance",
+                "modelId": "firefly-video",
                 "modelVersion": model_version,
                 "output": {"storeInputs": True},
                 "prompt": prompt,
