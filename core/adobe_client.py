@@ -297,6 +297,50 @@ class AdobeClient:
         return False
 
     @staticmethod
+    def _image_unsafe_message(resp) -> Optional[str]:
+        try:
+            if int(getattr(resp, "status_code", 0) or 0) != 451:
+                return None
+        except Exception:
+            return None
+
+        try:
+            payload = resp.json()
+        except Exception:
+            try:
+                payload = json.loads(str(getattr(resp, "text", "") or ""))
+            except Exception:
+                return None
+
+        if not isinstance(payload, dict):
+            return None
+        details = [payload]
+        nested_error = payload.get("error")
+        if isinstance(nested_error, dict):
+            details.append(nested_error)
+
+        for detail in details:
+            if str(detail.get("error_code") or "").strip().lower() != "image_unsafe":
+                continue
+            return str(detail.get("message") or "").strip() or (
+                "The generated images appear to be unsafe. "
+                "Try modifying the prompts or the seeds."
+            )
+        return None
+
+    @classmethod
+    def _raise_if_image_unsafe(cls, resp) -> None:
+        message = cls._image_unsafe_message(resp)
+        if message is None:
+            return
+        raise AdobeRequestError(
+            message,
+            status_code=451,
+            error_type="invalid_request_error",
+            user_message=message,
+        )
+
+    @staticmethod
     def _classify_network_error_type(exc: Exception) -> str:
         text = str(exc or "").strip().lower()
         if "timed out" in text or "timeout" in text:
@@ -428,6 +472,8 @@ class AdobeClient:
                 error_type=self._classify_network_error_type(exc),
             )
         if resp.status_code == 451:
+            if self._image_unsafe_message(resp) is not None:
+                return resp
             try:
                 return requests.post(
                     url,
@@ -1577,6 +1623,8 @@ class AdobeClient:
             if submit_resp.status_code in (401, 403):
                 break
 
+            self._raise_if_image_unsafe(submit_resp)
+
             last_error = submit_resp.text[:300]
 
         if submit_resp is None:
@@ -1647,6 +1695,7 @@ class AdobeClient:
                     poll_resp.status_code,
                     poll_resp.text[:500],
                 )
+                self._raise_if_image_unsafe(poll_resp)
                 if poll_resp.status_code in (429, 451) or poll_resp.status_code >= 500:
                     raise UpstreamTemporaryError(
                         f"poll failed: {poll_resp.status_code} {poll_resp.text[:300]}",
